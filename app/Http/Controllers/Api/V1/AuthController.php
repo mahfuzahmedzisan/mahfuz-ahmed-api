@@ -1,0 +1,255 @@
+<?php
+
+namespace App\Http\Controllers\Api\V1;
+
+use App\Http\Controllers\Controller;
+use App\Http\Requests\Api\V1\Auth\LoginRequest;
+use App\Http\Requests\Api\V1\Auth\RefreshTokenRequest;
+use App\Http\Requests\Api\V1\Auth\TwoFactorChallengeRequest;
+use App\Http\Resources\UserResource;
+use App\Models\User;
+use App\Services\PassportTokenService;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
+use Laravel\Fortify\Contracts\CreatesNewUsers;
+use Laravel\Fortify\Contracts\TwoFactorAuthenticationProvider;
+use Laravel\Fortify\Fortify;
+use Symfony\Component\HttpFoundation\Exception\BadRequestException;
+
+class AuthController extends Controller
+{
+    /** How long a pending two-factor challenge stays redeemable. */
+    private const CHALLENGE_TTL_MINUTES = 5;
+
+    public function __construct(
+        private readonly PassportTokenService $tokens,
+    ) {}
+
+    public function register(Request $request, CreatesNewUsers $creator): JsonResponse
+    {
+        $user = $creator->create($request->all());
+
+        $token = $this->tokens->issuePasswordToken(
+            $user->email,
+            $request->string('password')->toString(),
+        );
+
+        return response()->json([
+            'message' => 'Registered successfully.',
+            'data' => $this->tokenPayload($token, $user),
+        ], 201);
+    }
+
+    public function login(LoginRequest $request): JsonResponse
+    {
+        $credentials = $request->validated();
+
+        /** @var User|null $user */
+        $user = User::query()->where('email', $credentials['email'])->first();
+
+        if (! $user || ! Hash::check($credentials['password'], $user->password)) {
+            throw ValidationException::withMessages([
+                'email' => ['The provided credentials are incorrect.'],
+            ]);
+        }
+
+        if ($user->hasEnabledTwoFactorAuthentication()) {
+            return response()->json([
+                'message' => 'Two factor authentication required.',
+                'data' => [
+                    'two_factor' => true,
+                    'challenge_token' => $this->createChallengeToken($user, $credentials['password']),
+                ],
+            ]);
+        }
+
+        $token = $this->tokens->issuePasswordToken(
+            $credentials['email'],
+            $credentials['password'],
+        );
+
+        return response()->json([
+            'message' => 'Logged in successfully.',
+            'data' => $this->tokenPayload($token, $user),
+        ]);
+    }
+
+    /**
+     * Completes a login that was paused for two-factor verification.
+     *
+     * This API is stateless (Bearer tokens, no PHP session), so it can't use
+     * Fortify's own session-based `login.id` flow. Instead the first factor
+     * (password) is proven once and sealed - along with the password itself,
+     * so the real OAuth token can still be minted via the password grant -
+     * into a short-lived, authenticated (`Crypt`), single-use challenge token.
+     */
+    public function twoFactorChallenge(
+        TwoFactorChallengeRequest $request,
+        TwoFactorAuthenticationProvider $provider,
+    ): JsonResponse {
+        $payload = $this->decryptChallengeToken($request->string('challenge_token')->toString());
+
+        $usedKey = "2fa-challenge-used:{$payload['nonce']}";
+
+        if (Cache::has($usedKey)) {
+            throw ValidationException::withMessages([
+                'challenge_token' => ['This login challenge has already been used.'],
+            ]);
+        }
+
+        /** @var User|null $user */
+        $user = User::query()->find($payload['user_id']);
+
+        if (! $user || ! $user->hasEnabledTwoFactorAuthentication()) {
+            throw ValidationException::withMessages([
+                'challenge_token' => ['This login challenge is no longer valid.'],
+            ]);
+        }
+
+        $valid = $this->verifyCode($user, $provider, $request->input('code'), $request->input('recovery_code'));
+
+        if (! $valid) {
+            throw ValidationException::withMessages([
+                'code' => ['The provided two factor authentication code was invalid.'],
+            ]);
+        }
+
+        Cache::put($usedKey, true, now()->addMinutes(self::CHALLENGE_TTL_MINUTES + 1));
+
+        $token = $this->tokens->issuePasswordToken($payload['email'], $payload['password']);
+
+        return response()->json([
+            'message' => 'Logged in successfully.',
+            'data' => $this->tokenPayload($token, $user),
+        ]);
+    }
+
+    public function me(Request $request): JsonResponse
+    {
+        return response()->json([
+            'message' => 'Authenticated user retrieved successfully.',
+            'data' => [
+                'user' => new UserResource($request->user()),
+            ],
+        ]);
+    }
+
+    public function logout(Request $request): JsonResponse
+    {
+        $token = $request->user()?->token();
+
+        if ($token) {
+            $token->revoke();
+        }
+
+        return response()->json([
+            'message' => 'Logged out successfully.',
+            'data' => null,
+        ]);
+    }
+
+    public function refresh(RefreshTokenRequest $request): JsonResponse
+    {
+        $token = $this->tokens->refreshToken(
+            $request->string('refresh_token')->toString(),
+        );
+
+        return response()->json([
+            'message' => 'Token refreshed successfully.',
+            'data' => [
+                'token_type' => $token['token_type'],
+                'expires_in' => $token['expires_in'],
+                'access_token' => $token['access_token'],
+                'refresh_token' => $token['refresh_token'],
+            ],
+        ]);
+    }
+
+    private function createChallengeToken(User $user, string $password): string
+    {
+        return Crypt::encrypt([
+            'user_id' => $user->id,
+            'email' => $user->email,
+            'password' => $password,
+            'nonce' => Str::random(40),
+            'expires_at' => now()->addMinutes(self::CHALLENGE_TTL_MINUTES)->getTimestamp(),
+        ]);
+    }
+
+    /**
+     * @return array{user_id: int, email: string, password: string, nonce: string, expires_at: int}
+     */
+    private function decryptChallengeToken(string $token): array
+    {
+        try {
+            $payload = Crypt::decrypt($token);
+        } catch (\Throwable) {
+            throw ValidationException::withMessages([
+                'challenge_token' => ['This login challenge has expired or is invalid.'],
+            ]);
+        }
+
+        if (
+            ! is_array($payload)
+            || ! isset($payload['user_id'], $payload['email'], $payload['password'], $payload['nonce'], $payload['expires_at'])
+        ) {
+            throw new BadRequestException('Malformed two-factor challenge token.');
+        }
+
+        if ($payload['expires_at'] < now()->getTimestamp()) {
+            throw ValidationException::withMessages([
+                'challenge_token' => ['This login challenge has expired. Please log in again.'],
+            ]);
+        }
+
+        return $payload;
+    }
+
+    private function verifyCode(
+        User $user,
+        TwoFactorAuthenticationProvider $provider,
+        ?string $code,
+        ?string $recoveryCode,
+    ): bool {
+        if (filled($recoveryCode)) {
+            $codes = $user->recoveryCodes();
+
+            if (in_array($recoveryCode, $codes, true)) {
+                $user->replaceRecoveryCode($recoveryCode);
+
+                return true;
+            }
+
+            return false;
+        }
+
+        if (blank($code) || blank($user->two_factor_secret)) {
+            return false;
+        }
+
+        return $provider->verify(
+            Fortify::currentEncrypter()->decrypt($user->two_factor_secret),
+            $code,
+        );
+    }
+
+    /**
+     * @param  array{token_type: string, expires_in: int, access_token: string, refresh_token?: string|null}  $token
+     * @return array<string, mixed>
+     */
+    private function tokenPayload(array $token, User $user): array
+    {
+        return [
+            'token_type' => $token['token_type'],
+            'expires_in' => $token['expires_in'],
+            'access_token' => $token['access_token'],
+            'refresh_token' => $token['refresh_token'] ?? null,
+            'user' => new UserResource($user),
+        ];
+    }
+}
