@@ -2,6 +2,8 @@
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Passport\ClientRepository;
 
 uses(RefreshDatabase::class);
@@ -126,4 +128,84 @@ it('deletes the authenticated account and revokes tokens', function (): void {
     $this->withToken($login['access_token'])
         ->getJson('/api/v1/auth/me')
         ->assertUnauthorized();
+});
+
+it('updates authenticated user preferences', function (): void {
+    User::factory()->create([
+        'email' => 'prefs@example.com',
+        'password' => 'Password1!',
+    ]);
+
+    $login = loginAs('prefs@example.com');
+
+    $this->withToken($login['access_token'])
+        ->putJson('/api/v1/profile/preferences', [
+            'email_notifications' => false,
+            'push_notifications' => true,
+            'theme' => 'dark',
+        ])
+        ->assertOk()
+        ->assertJsonPath('data.user.email_notifications', false)
+        ->assertJsonPath('data.user.push_notifications', true)
+        ->assertJsonPath('data.user.theme', 'dark');
+
+    $this->assertDatabaseHas('users', [
+        'email' => 'prefs@example.com',
+        'email_notifications' => false,
+        'push_notifications' => true,
+        'theme' => 'dark',
+    ]);
+});
+
+it('rejects an invalid theme preference', function (): void {
+    User::factory()->create([
+        'email' => 'prefs-invalid@example.com',
+        'password' => 'Password1!',
+    ]);
+
+    $login = loginAs('prefs-invalid@example.com');
+
+    $this->withToken($login['access_token'])
+        ->putJson('/api/v1/profile/preferences', [
+            'theme' => 'neon',
+        ])
+        ->assertUnprocessable()
+        ->assertJsonValidationErrors(['theme']);
+});
+
+it('uploads and removes an authenticated user avatar', function (): void {
+    Storage::fake('public');
+
+    User::factory()->create([
+        'email' => 'avatar@example.com',
+        'password' => 'Password1!',
+    ]);
+
+    $login = loginAs('avatar@example.com');
+
+    $upload = $this->withToken($login['access_token'])
+        ->post('/api/v1/profile/avatar', [
+            'avatar' => UploadedFile::fake()->image('avatar.jpg', 200, 200),
+        ], [
+            'Accept' => 'application/json',
+        ])
+        ->assertOk();
+
+    $avatarUrl = $upload->json('data.user.avatar');
+    expect($avatarUrl)->not->toBeNull();
+
+    $user = User::query()->where('email', 'avatar@example.com')->firstOrFail();
+    expect($user->avatar)->not->toBeNull();
+    Storage::disk('public')->assertExists($user->avatar);
+
+    $this->withToken($login['access_token'])
+        ->deleteJson('/api/v1/profile/avatar')
+        ->assertOk()
+        ->assertJsonPath('data.user.avatar', null);
+
+    Storage::disk('public')->assertMissing($user->avatar);
+    $this->assertDatabaseHas('users', [
+        'email' => 'avatar@example.com',
+        'avatar' => null,
+    ]);
 });

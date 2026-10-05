@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Fortify\TwoFactorAuthenticatable;
 use Laravel\Passport\Contracts\OAuthenticatable;
 use Laravel\Passport\HasApiTokens;
@@ -20,7 +21,7 @@ use Laravel\Passport\HasApiTokens;
  * only ever written directly by trusted server code (UserSeeder, future
  * admin-promotion tooling).
  */
-#[Fillable(['name', 'email', 'password'])]
+#[Fillable(['name', 'email', 'password', 'avatar', 'email_notifications', 'push_notifications', 'theme'])]
 #[Hidden(['password', 'remember_token', 'two_factor_secret', 'two_factor_recovery_codes'])]
 class User extends Authenticatable implements OAuthenticatable
 {
@@ -39,11 +40,22 @@ class User extends Authenticatable implements OAuthenticatable
             'two_factor_confirmed_at' => 'datetime',
             'password' => 'hashed',
             'role' => UserRole::class,
+            'email_notifications' => 'boolean',
+            'push_notifications' => 'boolean',
         ];
     }
 
     public function isAdmin(): bool
     {
         return $this->role === UserRole::Admin;
+    }
+
+    public function avatarUrl(): ?string
+    {
+        if (! $this->avatar) {
+            return null;
+        }
+
+        return Storage::disk('public')->url($this->avatar);
     }
 }

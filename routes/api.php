@@ -24,6 +24,9 @@ Route::prefix('auth')->group(function (): void {
 Route::middleware('auth:api')->prefix('profile')->group(function (): void {
     Route::put('/', [ProfileController::class, 'update']);
     Route::put('password', [ProfileController::class, 'updatePassword']);
+    Route::put('preferences', [ProfileController::class, 'updatePreferences']);
+    Route::post('avatar', [ProfileController::class, 'updateAvatar']);
+    Route::delete('avatar', [ProfileController::class, 'destroyAvatar']);
     Route::delete('/', [ProfileController::class, 'destroy']);
 
     Route::prefix('two-factor-authentication')->group(function (): void {
