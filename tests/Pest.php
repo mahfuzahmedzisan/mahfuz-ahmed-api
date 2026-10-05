@@ -18,6 +18,12 @@ use Tests\TestCase;
 
 pest()->extend(TestCase::class)
  // ->use(RefreshDatabase::class)
+    ->beforeEach(function () {
+        $this->withHeaders([
+            'X-BFF-Secret' => (string) config('services.frontend.bff_secret'),
+            'X-Frontend-Origin' => 'http://localhost:3000',
+        ]);
+    })
     ->in('Feature');
 
 /*

@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Support\FrontendOrigins;
 use Carbon\CarbonInterval;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -62,11 +63,14 @@ class AppServiceProvider extends ServiceProvider
     private function configurePasswordResetUrl(): void
     {
         ResetPassword::createUrlUsing(function ($notifiable, string $token) {
-            $frontendUrl = rtrim((string) config('services.frontend.url'), '/');
+            $requested = FrontendOrigins::normalize((string) request()->header('X-Frontend-Origin', ''));
+            $frontendUrl = ($requested !== null && FrontendOrigins::contains($requested))
+                ? $requested
+                : FrontendOrigins::default();
 
             return sprintf(
                 '%s/reset-password?token=%s&email=%s',
-                $frontendUrl,
+                rtrim($frontendUrl, '/'),
                 $token,
                 urlencode($notifiable->getEmailForPasswordReset()),
             );

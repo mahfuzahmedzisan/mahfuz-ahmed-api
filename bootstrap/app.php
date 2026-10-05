@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\EnsureTrustedBff;
 use App\Http\Middleware\EnsureUserHasRole;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -17,7 +18,12 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
             'role' => EnsureUserHasRole::class,
+            'bff' => EnsureTrustedBff::class,
         ]);
+
+        // Every /api/v1 route. Not applied to /oauth/token (Passport's
+        // internal password grant) or /up (Coolify healthcheck).
+        $middleware->appendToGroup('api', EnsureTrustedBff::class);
 
         // This is an API-only application with no `login` route to redirect
         // guests to. Without this, Laravel's default Authenticate middleware

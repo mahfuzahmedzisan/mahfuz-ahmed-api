@@ -41,7 +41,17 @@ return [
     ],
 
     'frontend' => [
-        'url' => env('FRONTEND_URL', 'http://localhost:3000'),
+        /*
+         * Comma-separated browser origins allowed to use this API through the
+         * Next.js BFF. FRONTEND_URL remains a single-origin fallback.
+         * Example: https://next.maktechlaravel.cloud,http://localhost:3000
+         */
+        'urls' => array_values(array_filter(array_map(
+            static fn (string $origin): string => rtrim(trim($origin), '/'),
+            explode(',', (string) env('FRONTEND_URLS', env('FRONTEND_URL', '')))
+        ))),
+
+        'bff_secret' => env('BFF_SECRET'),
     ],
 
 ];

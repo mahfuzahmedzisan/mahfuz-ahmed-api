@@ -21,18 +21,22 @@ return [
      * browser only ever talks to the Next.js app, which holds the
      * encrypted session cookie and attaches Bearer tokens itself. CORS is
      * therefore defense-in-depth, not the primary access control: it is
-     * locked to FRONTEND_URL so that even a misconfigured or compromised
-     * client-side script cannot call this API directly from the browser.
+     * locked to FRONTEND_URLS (FRONTEND_URL fallback) so that even a
+     * misconfigured or compromised client-side script cannot call this API
+     * directly from the browser. The real caller gate is EnsureTrustedBff.
      */
     'paths' => ['api/*', 'oauth/*'],
 
     'allowed_methods' => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 
-    'allowed_origins' => array_filter([env('FRONTEND_URL')]),
+    'allowed_origins' => array_values(array_filter(array_map(
+        static fn (string $origin): string => rtrim(trim($origin), '/'),
+        explode(',', (string) env('FRONTEND_URLS', env('FRONTEND_URL', '')))
+    ))),
 
     'allowed_origins_patterns' => [],
 
-    'allowed_headers' => ['Content-Type', 'Accept', 'Authorization', 'X-Requested-With'],
+    'allowed_headers' => ['Content-Type', 'Accept', 'Authorization', 'X-Requested-With', 'X-BFF-Secret', 'X-Frontend-Origin'],
 
     'exposed_headers' => [],
 
