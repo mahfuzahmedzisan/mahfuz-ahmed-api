@@ -185,17 +185,17 @@ it('uploads and removes an authenticated user avatar', function (): void {
 
     $upload = $this->withToken($login['access_token'])
         ->post('/api/v1/profile/avatar', [
-            'avatar' => UploadedFile::fake()->image('avatar.jpg', 200, 200),
+            'avatar' => UploadedFile::fake()->image('avatar.jpg', 800, 600),
         ], [
             'Accept' => 'application/json',
         ])
         ->assertOk();
 
     $avatarUrl = $upload->json('data.user.avatar');
-    expect($avatarUrl)->not->toBeNull();
+    expect($avatarUrl)->toEndWith('.webp');
 
     $user = User::query()->where('email', 'avatar@example.com')->firstOrFail();
-    expect($user->avatar)->not->toBeNull();
+    expect($user->avatar)->toEndWith('.webp');
     Storage::disk('public')->assertExists($user->avatar);
 
     $this->withToken($login['access_token'])
@@ -208,4 +208,73 @@ it('uploads and removes an authenticated user avatar', function (): void {
         'email' => 'avatar@example.com',
         'avatar' => null,
     ]);
+});
+
+it('replaces an avatar and deletes the previous file', function (): void {
+    Storage::fake('public');
+
+    User::factory()->create([
+        'email' => 'avatar-replace@example.com',
+        'password' => 'Password1!',
+    ]);
+
+    $login = loginAs('avatar-replace@example.com');
+
+    $this->withToken($login['access_token'])
+        ->post('/api/v1/profile/avatar', [
+            'avatar' => UploadedFile::fake()->image('first.jpg', 400, 400),
+        ], [
+            'Accept' => 'application/json',
+        ])
+        ->assertOk();
+
+    $first = User::query()->where('email', 'avatar-replace@example.com')->firstOrFail()->avatar;
+
+    $this->withToken($login['access_token'])
+        ->post('/api/v1/profile/avatar', [
+            'avatar' => UploadedFile::fake()->image('second.png', 640, 480),
+        ], [
+            'Accept' => 'application/json',
+        ])
+        ->assertOk();
+
+    $second = User::query()->where('email', 'avatar-replace@example.com')->firstOrFail()->avatar;
+
+    expect($second)->not->toBe($first)
+        ->and($second)->toEndWith('.webp');
+
+    Storage::disk('public')->assertMissing($first);
+    Storage::disk('public')->assertExists($second);
+});
+
+it('deletes the avatar file when the account is deleted', function (): void {
+    Storage::fake('public');
+
+    $user = User::factory()->create([
+        'email' => 'avatar-account@example.com',
+        'password' => 'Password1!',
+    ]);
+
+    $login = loginAs('avatar-account@example.com');
+
+    $this->withToken($login['access_token'])
+        ->post('/api/v1/profile/avatar', [
+            'avatar' => UploadedFile::fake()->image('keep.jpg', 300, 300),
+        ], [
+            'Accept' => 'application/json',
+        ])
+        ->assertOk();
+
+    $path = $user->fresh()->avatar;
+    expect($path)->not->toBeNull();
+    Storage::disk('public')->assertExists($path);
+
+    $this->withToken($login['access_token'])
+        ->deleteJson('/api/v1/profile', [
+            'current_password' => 'Password1!',
+        ])
+        ->assertOk();
+
+    Storage::disk('public')->assertMissing($path);
+    $this->assertDatabaseMissing('users', ['id' => $user->id]);
 });

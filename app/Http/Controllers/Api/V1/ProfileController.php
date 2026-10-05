@@ -5,12 +5,13 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\UserResource;
 use App\Models\User;
+use App\Services\AvatarStorageService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Laravel\Fortify\Contracts\UpdatesUserPasswords;
 use Laravel\Fortify\Contracts\UpdatesUserProfileInformation;
+use Throwable;
 
 class ProfileController extends Controller
 {
@@ -56,44 +57,44 @@ class ProfileController extends Controller
         ]);
     }
 
-    public function updateAvatar(Request $request): JsonResponse
+    public function updateAvatar(Request $request, AvatarStorageService $avatars): JsonResponse
     {
         $request->validate([
-            'avatar' => ['required', 'image', 'max:2048'],
+            'avatar' => ['required', 'image', 'max:5120'],
         ]);
 
         /** @var User $user */
         $user = $request->user();
 
-        if ($user->avatar) {
-            Storage::disk('public')->delete($user->avatar);
-        }
+        try {
+            $user = $avatars->store($user, $request->file('avatar'));
+        } catch (Throwable $exception) {
+            report($exception);
 
-        $path = $request->file('avatar')->store('avatars', 'public');
-        $user->forceFill(['avatar' => $path])->save();
+            return response()->json([
+                'message' => 'Unable to process avatar.',
+                'data' => null,
+            ], 422);
+        }
 
         return response()->json([
             'message' => 'Avatar updated successfully.',
             'data' => [
-                'user' => new UserResource($user->fresh()),
+                'user' => new UserResource($user),
             ],
         ]);
     }
 
-    public function destroyAvatar(Request $request): JsonResponse
+    public function destroyAvatar(Request $request, AvatarStorageService $avatars): JsonResponse
     {
         /** @var User $user */
         $user = $request->user();
-
-        if ($user->avatar) {
-            Storage::disk('public')->delete($user->avatar);
-            $user->forceFill(['avatar' => null])->save();
-        }
+        $user = $avatars->delete($user);
 
         return response()->json([
             'message' => 'Avatar removed successfully.',
             'data' => [
-                'user' => new UserResource($user->fresh()),
+                'user' => new UserResource($user),
             ],
         ]);
     }
@@ -102,7 +103,7 @@ class ProfileController extends Controller
      * Deletes the authenticated user's account. Revokes every Passport token
      * first so no token outlives the account it was issued for.
      */
-    public function destroy(Request $request): JsonResponse
+    public function destroy(Request $request, AvatarStorageService $avatars): JsonResponse
     {
         $request->validate([
             'current_password' => ['required', 'string', 'current_password:api'],
@@ -111,9 +112,7 @@ class ProfileController extends Controller
         /** @var User $user */
         $user = $request->user();
 
-        if ($user->avatar) {
-            Storage::disk('public')->delete($user->avatar);
-        }
+        $avatars->purge($user);
 
         $user->tokens()->update(['revoked' => true]);
         $user->delete();
