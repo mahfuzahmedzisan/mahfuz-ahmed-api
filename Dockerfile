@@ -1,95 +1,97 @@
-FROM php:8.4-fpm
+# Coolify / production app image for the mahfuz-ahmed-api (Laravel API).
+#
+# Topology: this image runs Nginx + PHP-FPM + queue workers + the scheduler.
+# Postgres/MySQL, Redis, and any future Reverb/Meilisearch stay external Coolify
+# resources — never start them in this container.
+#
+# Horizon / Pulse: Supervisor stubs exist in docker/supervisord.conf but must
+# stay commented until those Composer packages are installed. Enabling Horizon
+# means disabling laravel-queue-worker so they never consume the same queues.
 
-# Add custom php.ini file
-COPY ./docker/php.ini /usr/local/etc/php/conf.d/custom.ini
+FROM php:8.4-fpm-bookworm AS build
 
-# Install system dependencies and PHP extensions in a single layer
-RUN apt-get update && apt-get install -y \
-    $PHPIZE_DEPS \
-    nano \
-    nginx \
-    git \
-    unzip \
-    curl \
-    libpng-dev \
-    libonig-dev \
-    libxml2-dev \
-    libzip-dev \
-    libpq-dev \
-    zip \
-    libjpeg62-turbo-dev \
-    libfreetype6-dev \
-    supervisor \
-    gnupg2 \
-    ca-certificates \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        $PHPIZE_DEPS \
+        git \
+        libfreetype6-dev \
+        libjpeg62-turbo-dev \
+        libonig-dev \
+        libpng-dev \
+        libzip-dev \
+        unzip \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install pdo_mysql mbstring zip exif pcntl gd bcmath \
+    && docker-php-ext-install -j"$(nproc)" bcmath exif gd mbstring pcntl pdo_mysql zip \
     && pecl install redis \
-    && docker-php-ext-enable redis \
-    && apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false $PHPIZE_DEPS \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && docker-php-ext-enable opcache redis \
+    && rm -rf /var/lib/apt/lists/* /tmp/pear
 
-# Install Node.js 20
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-RUN apt-get update && apt-get install -y nodejs
-RUN apt-get clean && rm -rf /var/lib/apt/lists/*
+COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
+COPY --from=node:22-bookworm-slim /usr/local/ /usr/local/
 
-# Install Composer
-COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
-
-# Set working directory
 WORKDIR /var/www
 
-# Copy Laravel app source
+COPY composer.json composer.lock ./
+RUN composer install \
+    --no-dev \
+    --no-interaction \
+    --no-progress \
+    --no-scripts \
+    --prefer-dist
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
 COPY . .
 
-# Create .env file and set proper permissions
-RUN if [ -f .env.example ]; then cp .env.example .env; else touch .env; fi \
-    && chown www-data:www-data .env \
-    && chmod 664 .env
+RUN composer dump-autoload --classmap-authoritative --no-dev --no-interaction \
+    && npm run build
 
-# Change ownership of the entire application directory to the www-data user
-RUN chown -R www-data:www-data /var/www
+FROM php:8.4-fpm-bookworm AS production
 
-# Prepare Laravel cache paths & permissions
-# RUN mkdir -p storage/framework/{views,sessions,cache} \
-#     && mkdir -p bootstrap/cache \
-#     && chown -R www-data:www-data storage bootstrap/cache \
-#     && chmod -R 775 storage bootstrap/cache
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        libfreetype6 \
+        libjpeg62-turbo \
+        libonig5 \
+        libpng16-16 \
+        libzip4 \
+        nginx \
+        supervisor \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -f /etc/nginx/sites-enabled/default
 
-RUN mkdir -p storage/framework/{views,sessions,cache} \
-    && mkdir -p storage/logs \
-    && mkdir -p bootstrap/cache \
-    && mkdir -p /var/log/supervisor \
-    && chown -R www-data:www-data storage/framework storage/logs bootstrap/cache \
-    && chmod -R 775 storage/framework storage/logs bootstrap/cache
+COPY --from=build /usr/local/lib/php/extensions/ /usr/local/lib/php/extensions/
+COPY --from=build /usr/local/etc/php/conf.d/ /usr/local/etc/php/conf.d/
+COPY --from=build --chown=www-data:www-data /var/www /var/www
 
-# Install PHP dependencies
-RUN composer install --no-dev --optimize-autoloader
+COPY docker/php.ini /usr/local/etc/php/conf.d/99-production.ini
+COPY docker/php-fpm.conf /usr/local/etc/php-fpm.d/zz-production.conf
+COPY docker/nginx.conf /etc/nginx/nginx.conf
+COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY docker/entrypoint.sh /usr/local/bin/application-entrypoint
 
-# Install npm dependencies and build assets
-RUN npm install && npm run build
+RUN chmod 0755 /usr/local/bin/application-entrypoint \
+    && mkdir -p /run/nginx /var/log/supervisor \
+    && chown -R www-data:www-data /var/www/storage /var/www/bootstrap/cache
 
-# Config and route caching happens in the entrypoint instead of here. The
-# platform injects environment variables into the running container, so caching
-# at build time would bake .env.example placeholders into bootstrap/cache, where
-# they take precedence over the real values.
+WORKDIR /var/www
 
-# Configure Nginx and Supervisor
-RUN rm -f /etc/nginx/sites-enabled/default
-COPY ./docker/nginx.conf /etc/nginx/nginx.conf
-COPY ./docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-COPY ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+ENV QUEUE_CONNECTION=redis \
+    QUEUE_NAMES=default \
+    QUEUE_SLEEP=3 \
+    QUEUE_TRIES=3 \
+    QUEUE_TIMEOUT=300 \
+    QUEUE_MAX_TIME=3600 \
+    QUEUE_MEMORY=128 \
+    QUEUE_PROCESSES=2
 
-# Expose HTTP port
 EXPOSE 80
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost/up || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+    CMD ["curl", "--fail", "--silent", "--show-error", "--max-time", "5", "--output", "/dev/null", "http://127.0.0.1/up"]
 
-# Start all services via supervisor
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/application-entrypoint"]
 CMD ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
