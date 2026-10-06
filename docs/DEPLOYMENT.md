@@ -56,12 +56,33 @@ with `storage:link`.
 
 ## 4. Database
 
-`SESSION_DRIVER=database` and `CACHE_STORE=database`, so sessions, cache, and
-the `oauth_*` tables all survive a rebuild on their own. Run migrations with
-`php artisan migrate --force`.
+Passport `oauth_*` tables live in the database and survive a rebuild on their
+own. Run migrations with `php artisan migrate --force`.
 
 Never run `migrate:fresh` against production. It truncates `oauth_access_tokens`
 and `oauth_refresh_tokens` along with everything else.
+
+## 5. Redis (required for cache + queues)
+
+This image expects an **external** Redis (Coolify Redis resource or managed
+host). The PHP `redis` extension is already enabled in the Dockerfile. Do not
+run Redis inside the app container.
+
+Set in Coolify (or `.env`):
+
+```env
+REDIS_CLIENT=phpredis
+REDIS_URL=redis://default:PASSWORD@HOST:PORT/0
+QUEUE_CONNECTION=redis
+CACHE_STORE=redis
+```
+
+`REDIS_URL` alone is enough; `REDIS_HOST` / `REDIS_PASSWORD` / `REDIS_PORT` are
+fallbacks when the URL is empty. The Supervisor queue worker reads
+`QUEUE_CONNECTION` (default `redis` in the image).
+
+API sessions stay on `SESSION_DRIVER=file` (or `database`) — Passport tokens do
+not need Redis sessions.
 
 ## Configuration caching
 

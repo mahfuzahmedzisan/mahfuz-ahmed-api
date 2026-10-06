@@ -83,6 +83,7 @@ RUN chmod 0755 /usr/local/bin/application-entrypoint \
 WORKDIR /var/www
 
 ENV QUEUE_CONNECTION=redis \
+    CACHE_STORE=redis \
     QUEUE_NAMES=default \
     QUEUE_SLEEP=3 \
     QUEUE_TRIES=3 \
