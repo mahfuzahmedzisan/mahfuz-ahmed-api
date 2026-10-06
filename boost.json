@@ -17,6 +17,7 @@
         "laravel-best-practices",
         "testing-best-practices",
         "passport-development",
+        "scout-development",
         "tailwindcss-development",
         "deploying-laravel-cloud"
     ]

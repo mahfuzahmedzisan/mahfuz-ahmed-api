@@ -97,3 +97,19 @@ they silently override the real values.
 Stay logged in to the admin panel, deploy, then reload. If you land back on the
 login page, one of the three requirements above is not in place - check the
 Passport key variables first.
+
+## 6. Search (optional at runtime)
+
+Search engines stay **outside** this image (Typesense, Meilisearch, Algolia, or
+Turbopuffer). `SCOUT_DRIVER=collection` or an unreachable engine still serves
+admin lists through Eloquent `LIKE`.
+
+Do not run imports from the container entrypoint. After setting `SCOUT_DRIVER`
+and that engine's credentials in Coolify, run once:
+
+```bash
+php artisan scout:import-all --fresh
+```
+
+Use `--queue` when Redis workers are up and the catalog is large. Switching
+engines is the same command against the new driver. See `docs/scout.md`.

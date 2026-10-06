@@ -1,8 +1,8 @@
 # Coolify / production app image for the mahfuz-ahmed-api (Laravel API).
 #
 # Topology: this image runs Nginx + PHP-FPM + queue workers + the scheduler.
-# Postgres/MySQL, Redis, and any future Reverb/Meilisearch stay external Coolify
-# resources — never start them in this container.
+# Postgres/MySQL, Redis, and search engines (Typesense, Meilisearch, Algolia,
+# Turbopuffer) stay external Coolify resources — never start them in this container.
 #
 # Horizon / Pulse: Supervisor stubs exist in docker/supervisord.conf but must
 # stay commented until those Composer packages are installed. Enabling Horizon

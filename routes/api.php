@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\V1\Admin\UserController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\PasswordResetController;
 use App\Http\Controllers\Api\V1\ProfileController;
@@ -47,8 +48,12 @@ Route::middleware('auth:api')->prefix('profile')->group(function (): void {
  * added back later: stack `role:admin` on top of `auth:api`, never rely on
  * `auth:api` alone to gate privileged actions.
  */
-Route::middleware(['auth:api', 'role:admin'])->get('admin/ping', function (Request $request) {
-    return ApiResponse::success('Admin access confirmed.', [
-        'user_id' => $request->user()->id,
-    ]);
+Route::middleware(['auth:api', 'role:admin', 'throttle:admin-users'])->group(function (): void {
+    Route::get('admin/ping', function (Request $request) {
+        return ApiResponse::success('Admin access confirmed.', [
+            'user_id' => $request->user()->id,
+        ]);
+    });
+
+    Route::get('admin/users', [UserController::class, 'index']);
 });

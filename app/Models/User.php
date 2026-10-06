@@ -3,7 +3,11 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Contracts\Scout\DefinesSearchIndex;
 use App\Enums\UserRole;
+use App\Models\Concerns\ConfiguresScoutSearch;
+use App\Support\Scout\SearchIndexDefinition;
+use App\Support\Scout\SearchIndexField;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -23,10 +27,10 @@ use Laravel\Passport\HasApiTokens;
  */
 #[Fillable(['name', 'email', 'password', 'avatar', 'email_notifications', 'push_notifications', 'theme'])]
 #[Hidden(['password', 'remember_token', 'two_factor_secret', 'two_factor_recovery_codes'])]
-class User extends Authenticatable implements OAuthenticatable
+class User extends Authenticatable implements DefinesSearchIndex, OAuthenticatable
 {
     /** @use HasFactory<UserFactory> */
-    use HasApiTokens, HasFactory, Notifiable, TwoFactorAuthenticatable;
+    use ConfiguresScoutSearch, HasApiTokens, HasFactory, Notifiable, TwoFactorAuthenticatable;
 
     /**
      * Get the attributes that should be cast.
@@ -57,5 +61,32 @@ class User extends Authenticatable implements OAuthenticatable
         }
 
         return Storage::disk('public')->url($this->avatar);
+    }
+
+    public static function searchIndexDefinition(): SearchIndexDefinition
+    {
+        return new SearchIndexDefinition([
+            SearchIndexField::string('name'),
+            SearchIndexField::string('email'),
+            SearchIndexField::string('role', filterable: true),
+            SearchIndexField::int64('created_at', sortable: true),
+        ]);
+    }
+
+    /**
+     * Secrets (password, 2FA, tokens) are intentionally absent.
+     *
+     * @return array<string, mixed>
+     */
+    public function searchableDocument(): array
+    {
+        $role = $this->role instanceof UserRole ? $this->role->value : (string) $this->role;
+
+        return [
+            'name' => (string) $this->name,
+            'email' => (string) $this->email,
+            'role' => $role,
+            'created_at' => $this->created_at?->getTimestamp() ?? 0,
+        ];
     }
 }
