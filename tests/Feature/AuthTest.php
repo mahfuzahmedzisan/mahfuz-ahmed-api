@@ -176,6 +176,32 @@ it('refreshes an access token', function (): void {
         ]);
 });
 
+it('reuses a just-rotated refresh result for concurrent callers', function (): void {
+    User::factory()->create([
+        'email' => 'admin@example.com',
+        'password' => 'Password1!',
+    ]);
+
+    $login = $this->postJson('/api/v1/auth/login', [
+        'email' => 'admin@example.com',
+        'password' => 'Password1!',
+    ])->json('data');
+
+    $first = $this->postJson('/api/v1/auth/refresh', [
+        'refresh_token' => $login['refresh_token'],
+    ])->assertOk()->json('data');
+
+    // Passport revoked the presented refresh token on first use. A second
+    // caller with the same token (proxy + RSC race) must still receive the
+    // cached pair instead of 401/422 and a forced logout.
+    $second = $this->postJson('/api/v1/auth/refresh', [
+        'refresh_token' => $login['refresh_token'],
+    ])->assertOk()->json('data');
+
+    expect($second['access_token'])->toBe($first['access_token'])
+        ->and($second['refresh_token'])->toBe($first['refresh_token']);
+});
+
 it('throttles login after five attempts', function (): void {
     User::factory()->create([
         'email' => 'locked@example.com',

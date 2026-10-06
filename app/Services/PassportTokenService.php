@@ -2,13 +2,23 @@
 
 namespace App\Services;
 
+use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response as HttpResponse;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class PassportTokenService
 {
+    /**
+     * How long a successful refresh result stays reusable for the same
+     * presented refresh token. Concurrent BFF requests (proxy + RSC, or
+     * parallel navigations) otherwise race Passport's one-time rotation and
+     * force a logout.
+     */
+    private const REFRESH_REUSE_SECONDS = 30;
+
     /**
      * Exchange user credentials for a password-grant token pair.
      *
@@ -33,13 +43,43 @@ class PassportTokenService
      */
     public function refreshToken(string $refreshToken, string $scope = '*'): array
     {
-        return $this->requestToken([
-            'grant_type' => 'refresh_token',
-            'client_id' => $this->clientId(),
-            'client_secret' => $this->clientSecret(),
-            'refresh_token' => $refreshToken,
-            'scope' => $scope,
-        ]);
+        $cacheKey = 'passport:refresh:'.hash('sha256', $refreshToken);
+        $lockKey = $cacheKey.':lock';
+
+        try {
+            return Cache::lock($lockKey, 10)->block(5, function () use ($refreshToken, $scope, $cacheKey) {
+                /** @var array{token_type: string, expires_in: int, access_token: string, refresh_token: string|null}|null $cached */
+                $cached = Cache::get($cacheKey);
+
+                if ($this->isTokenPair($cached)) {
+                    return $cached;
+                }
+
+                $token = $this->requestToken([
+                    'grant_type' => 'refresh_token',
+                    'client_id' => $this->clientId(),
+                    'client_secret' => $this->clientSecret(),
+                    'refresh_token' => $refreshToken,
+                    'scope' => $scope,
+                ]);
+
+                Cache::put($cacheKey, $token, now()->addSeconds(self::REFRESH_REUSE_SECONDS));
+
+                return $token;
+            });
+        } catch (LockTimeoutException) {
+            /** @var array{token_type: string, expires_in: int, access_token: string, refresh_token: string|null}|null $cached */
+            $cached = Cache::get($cacheKey);
+
+            if ($this->isTokenPair($cached)) {
+                return $cached;
+            }
+
+            throw new HttpException(
+                HttpResponse::HTTP_SERVICE_UNAVAILABLE,
+                'Token refresh is busy. Retry shortly.',
+            );
+        }
     }
 
     /**
@@ -79,6 +119,20 @@ class PassportTokenService
                 ? (string) $payload['refresh_token']
                 : null,
         ];
+    }
+
+    /**
+     * @param  mixed  $value
+     * @return ($value is array{token_type: string, expires_in: int, access_token: string, refresh_token: string|null} ? true : false)
+     */
+    private function isTokenPair(mixed $value): bool
+    {
+        return is_array($value)
+            && isset($value['access_token'])
+            && is_string($value['access_token'])
+            && $value['access_token'] !== ''
+            && isset($value['expires_in'])
+            && is_int($value['expires_in']);
     }
 
     private function clientId(): string
