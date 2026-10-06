@@ -1,6 +1,6 @@
 # Image conversion
 
-Raster uploads (JPEG, PNG, GIF, WebP, BMP, and the rest) are stored as WebP. SVG uploads are stored as the original `.svg`.
+Raster uploads (JPEG, PNG, GIF, WebP, BMP, and the rest) are stored as WebP. SVG uploads are sanitized, then stored as `.svg`.
 
 `App\Services\ImageConversionService` owns the pipeline. Call it from any service, controller, or job:
 
@@ -42,7 +42,7 @@ Rebuild PHP GD with `libwebp-dev` when you want `imagewebp()` as well. `cwebp` a
 
 ## SVG
 
-SVG files are copied as-is. If `svgo` is on `PATH`, Spatie's optimizer minifies them. Raster conversion is not applied.
+SVG uploads are stored as `.svg` only after `enshrined/svg-sanitize` runs. Scripts, event handlers, and remote references are removed. If sanitization returns nothing, the upload is rejected. Spatie may still minify the cleaned file when `svgo` is on `PATH`. Raster conversion is not applied to SVG.
 
 ## Config
 

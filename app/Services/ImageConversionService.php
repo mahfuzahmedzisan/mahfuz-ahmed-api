@@ -12,8 +12,10 @@ use Throwable;
 
 class ImageConversionService
 {
+    public function __construct(private readonly SvgSanitizer $svgSanitizer) {}
+
     /**
-     * Stores an SVG unchanged, or encodes any other raster image as WebP.
+     * Stores a sanitized SVG, or encodes any other raster image as WebP.
      * Throws when WebP cannot be produced. Never falls back to PNG.
      */
     public function convertAndStore(
@@ -32,7 +34,8 @@ class ImageConversionService
         if ($format === 'svg' && $options->passthroughSvg) {
             $relative = $directory.'/'.$basename.'.svg';
             $absolute = $storage->path($relative);
-            $this->writeBytes($absolute, $this->readContents($source));
+            $clean = $this->svgSanitizer->sanitize($this->readContents($source));
+            $this->writeBytes($absolute, $clean);
             $this->optimizeQuietly($absolute);
 
             return new StoredImageResult($relative, 'svg', $disk, 'image/svg+xml');
@@ -85,7 +88,7 @@ class ImageConversionService
         $mime = $this->mime($source);
         $path = $this->pathOf($source);
 
-        if (str_contains($mime, 'svg') || $this->isSvgFile($path)) {
+        if ($this->svgSanitizer->isSvg($source)) {
             return 'svg';
         }
 
@@ -230,26 +233,6 @@ class ImageConversionService
         } catch (Throwable) {
             // Missing optimizer binaries must not fail an otherwise valid store.
         }
-    }
-
-    private function isSvgFile(string $path): bool
-    {
-        $handle = @fopen($path, 'rb');
-        if ($handle === false) {
-            return false;
-        }
-
-        $header = fread($handle, 256);
-        fclose($handle);
-
-        if (! is_string($header)) {
-            return false;
-        }
-
-        $trimmed = ltrim($header);
-
-        return str_starts_with($trimmed, '<svg')
-            || (str_starts_with($trimmed, '<?xml') && str_contains($header, '<svg'));
     }
 
     private function isWebpFile(string $path): bool

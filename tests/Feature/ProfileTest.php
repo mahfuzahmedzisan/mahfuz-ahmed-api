@@ -2,6 +2,7 @@
 
 use App\Models\User;
 use App\Services\ImageConversionService;
+use App\Services\SvgSanitizer;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -282,7 +283,7 @@ it('deletes the avatar file when the account is deleted', function (): void {
     $this->assertDatabaseMissing('users', ['id' => $user->id]);
 });
 
-it('stores an svg avatar in its original format', function (): void {
+it('stores a sanitized svg avatar and strips active content', function (): void {
     Storage::fake('public');
 
     User::factory()->create([
@@ -291,13 +292,16 @@ it('stores an svg avatar in its original format', function (): void {
     ]);
 
     $login = loginAs('avatar-svg@example.com');
+    $svg = <<<'SVG'
+<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8">
+  <circle cx="4" cy="4" r="3" onclick="alert(1)"></circle>
+  <script>alert(1)</script>
+</svg>
+SVG;
 
     $upload = $this->withToken($login['access_token'])
         ->post('/api/v1/profile/avatar', [
-            'avatar' => UploadedFile::fake()->createWithContent(
-                'avatar.svg',
-                '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"></svg>',
-            ),
+            'avatar' => UploadedFile::fake()->createWithContent('avatar.svg', $svg),
         ], [
             'Accept' => 'application/json',
         ])
@@ -308,6 +312,40 @@ it('stores an svg avatar in its original format', function (): void {
     $user = User::query()->where('email', 'avatar-svg@example.com')->firstOrFail();
     expect($user->avatar)->toEndWith('.svg');
     Storage::disk('public')->assertExists($user->avatar);
+
+    $stored = Storage::disk('public')->get($user->avatar);
+    expect($stored)->toContain('<circle')
+        ->and($stored)->not->toContain('<script')
+        ->and($stored)->not->toContain('onclick');
+});
+
+it('rejects an svg avatar that cannot be sanitized', function (): void {
+    User::factory()->create([
+        'email' => 'avatar-svg-bad@example.com',
+        'password' => 'Password1!',
+    ]);
+
+    $this->mock(SvgSanitizer::class, function ($mock): void {
+        $mock->shouldReceive('isSvg')->andReturn(true);
+        $mock->shouldReceive('sanitize')
+            ->once()
+            ->andThrow(new RuntimeException('The SVG file could not be sanitized and was rejected.'));
+    });
+
+    $login = loginAs('avatar-svg-bad@example.com');
+
+    $this->withToken($login['access_token'])
+        ->post('/api/v1/profile/avatar', [
+            'avatar' => UploadedFile::fake()->createWithContent(
+                'avatar.svg',
+                '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
+            ),
+        ], [
+            'Accept' => 'application/json',
+        ])
+        ->assertStatus(HttpResponse::HTTP_UNPROCESSABLE_ENTITY)
+        ->assertJsonPath('message', 'The SVG file could not be sanitized and was rejected.')
+        ->assertJsonPath('data', null);
 });
 
 it('returns an unprocessable envelope when avatar encoding fails', function (): void {

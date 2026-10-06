@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\UserResource;
 use App\Models\User;
 use App\Services\AvatarStorageService;
+use App\Support\AllowedAvatar;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -52,12 +53,7 @@ class ProfileController extends Controller
     public function updateAvatar(Request $request, AvatarStorageService $avatars): JsonResponse
     {
         $request->validate([
-            'avatar' => [
-                'required',
-                'file',
-                'max:5120',
-                'mimetypes:image/jpeg,image/png,image/gif,image/webp,image/bmp,image/svg+xml',
-            ],
+            'avatar' => AllowedAvatar::rules(),
         ]);
 
         /** @var User $user */
