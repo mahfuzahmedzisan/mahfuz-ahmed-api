@@ -1,10 +1,13 @@
 <?php
 
 use App\Models\User;
+use App\Services\ImageConversionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Passport\ClientRepository;
+use RuntimeException;
+use Symfony\Component\HttpFoundation\Response as HttpResponse;
 
 uses(RefreshDatabase::class);
 
@@ -277,4 +280,57 @@ it('deletes the avatar file when the account is deleted', function (): void {
 
     Storage::disk('public')->assertMissing($path);
     $this->assertDatabaseMissing('users', ['id' => $user->id]);
+});
+
+it('stores an svg avatar in its original format', function (): void {
+    Storage::fake('public');
+
+    User::factory()->create([
+        'email' => 'avatar-svg@example.com',
+        'password' => 'Password1!',
+    ]);
+
+    $login = loginAs('avatar-svg@example.com');
+
+    $upload = $this->withToken($login['access_token'])
+        ->post('/api/v1/profile/avatar', [
+            'avatar' => UploadedFile::fake()->createWithContent(
+                'avatar.svg',
+                '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"></svg>',
+            ),
+        ], [
+            'Accept' => 'application/json',
+        ])
+        ->assertOk();
+
+    expect($upload->json('data.user.avatar'))->toEndWith('.svg');
+
+    $user = User::query()->where('email', 'avatar-svg@example.com')->firstOrFail();
+    expect($user->avatar)->toEndWith('.svg');
+    Storage::disk('public')->assertExists($user->avatar);
+});
+
+it('returns an unprocessable envelope when avatar encoding fails', function (): void {
+    User::factory()->create([
+        'email' => 'avatar-fail@example.com',
+        'password' => 'Password1!',
+    ]);
+
+    $this->mock(ImageConversionService::class, function ($mock): void {
+        $mock->shouldReceive('convertAndStore')
+            ->once()
+            ->andThrow(new RuntimeException('WebP encoding is unavailable. Enable GD WebP or install cwebp.'));
+    });
+
+    $login = loginAs('avatar-fail@example.com');
+
+    $this->withToken($login['access_token'])
+        ->post('/api/v1/profile/avatar', [
+            'avatar' => UploadedFile::fake()->image('avatar.jpg', 200, 200),
+        ], [
+            'Accept' => 'application/json',
+        ])
+        ->assertStatus(HttpResponse::HTTP_UNPROCESSABLE_ENTITY)
+        ->assertJsonPath('message', 'WebP encoding is unavailable. Enable GD WebP or install cwebp.')
+        ->assertJsonPath('data', null);
 });

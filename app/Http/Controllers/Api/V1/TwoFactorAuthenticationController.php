@@ -17,12 +17,9 @@ class TwoFactorAuthenticationController extends Controller
     {
         $user = $request->user();
 
-        return response()->json([
-            'message' => 'Two factor authentication status retrieved.',
-            'data' => [
-                'enabled' => $user->hasEnabledTwoFactorAuthentication(),
-                'pending_confirmation' => ! is_null($user->two_factor_secret) && is_null($user->two_factor_confirmed_at),
-            ],
+        return $this->apiSuccess('Two factor authentication status retrieved.', [
+            'enabled' => $user->hasEnabledTwoFactorAuthentication(),
+            'pending_confirmation' => ! is_null($user->two_factor_secret) && is_null($user->two_factor_confirmed_at),
         ]);
     }
 
@@ -42,13 +39,10 @@ class TwoFactorAuthenticationController extends Controller
         $enable($user, force: true);
         $user->refresh();
 
-        return response()->json([
-            'message' => 'Two factor authentication enrollment started. Confirm with a code to finish.',
-            'data' => [
-                'secret' => Fortify::currentEncrypter()->decrypt($user->two_factor_secret),
-                'qr_code_svg' => $user->twoFactorQrCodeSvg(),
-                'recovery_codes' => $user->recoveryCodes(),
-            ],
+        return $this->apiSuccess('Two factor authentication enrollment started. Confirm with a code to finish.', [
+            'secret' => Fortify::currentEncrypter()->decrypt($user->two_factor_secret),
+            'qr_code_svg' => $user->twoFactorQrCodeSvg(),
+            'recovery_codes' => $user->recoveryCodes(),
         ]);
     }
 
@@ -60,10 +54,7 @@ class TwoFactorAuthenticationController extends Controller
 
         $confirm($request->user(), $request->string('code')->toString());
 
-        return response()->json([
-            'message' => 'Two factor authentication confirmed.',
-            'data' => null,
-        ]);
+        return $this->apiSuccess('Two factor authentication confirmed.');
     }
 
     public function disable(Request $request, DisableTwoFactorAuthentication $disable): JsonResponse
@@ -74,10 +65,7 @@ class TwoFactorAuthenticationController extends Controller
 
         $disable($request->user());
 
-        return response()->json([
-            'message' => 'Two factor authentication disabled.',
-            'data' => null,
-        ]);
+        return $this->apiSuccess('Two factor authentication disabled.');
     }
 
     public function recoveryCodes(Request $request, GenerateNewRecoveryCodes $generate): JsonResponse
@@ -88,11 +76,8 @@ class TwoFactorAuthenticationController extends Controller
 
         $generate($request->user());
 
-        return response()->json([
-            'message' => 'Recovery codes regenerated.',
-            'data' => [
-                'recovery_codes' => $request->user()->fresh()->recoveryCodes(),
-            ],
+        return $this->apiSuccess('Recovery codes regenerated.', [
+            'recovery_codes' => $request->user()->fresh()->recoveryCodes(),
         ]);
     }
 }

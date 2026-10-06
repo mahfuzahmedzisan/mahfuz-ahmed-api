@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\PasswordResetController;
 use App\Http\Controllers\Api\V1\ProfileController;
 use App\Http\Controllers\Api\V1\TwoFactorAuthenticationController;
+use App\Support\ApiResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
@@ -47,8 +48,7 @@ Route::middleware('auth:api')->prefix('profile')->group(function (): void {
  * `auth:api` alone to gate privileged actions.
  */
 Route::middleware(['auth:api', 'role:admin'])->get('admin/ping', function (Request $request) {
-    return response()->json([
-        'message' => 'Admin access confirmed.',
-        'data' => ['user_id' => $request->user()->id],
+    return ApiResponse::success('Admin access confirmed.', [
+        'user_id' => $request->user()->id,
     ]);
 });

@@ -39,10 +39,10 @@ class AuthController extends Controller
             $request->string('password')->toString(),
         );
 
-        return response()->json([
-            'message' => 'Registered successfully.',
-            'data' => $this->tokenPayload($token, $user),
-        ], 201);
+        return $this->apiCreated(
+            'Registered successfully.',
+            $this->tokenPayload($token, $user),
+        );
     }
 
     public function login(LoginRequest $request): JsonResponse
@@ -59,12 +59,9 @@ class AuthController extends Controller
         }
 
         if ($user->hasEnabledTwoFactorAuthentication()) {
-            return response()->json([
-                'message' => 'Two factor authentication required.',
-                'data' => [
-                    'two_factor' => true,
-                    'challenge_token' => $this->createChallengeToken($user, $credentials['password']),
-                ],
+            return $this->apiSuccess('Two factor authentication required.', [
+                'two_factor' => true,
+                'challenge_token' => $this->createChallengeToken($user, $credentials['password']),
             ]);
         }
 
@@ -73,10 +70,10 @@ class AuthController extends Controller
             $credentials['password'],
         );
 
-        return response()->json([
-            'message' => 'Logged in successfully.',
-            'data' => $this->tokenPayload($token, $user),
-        ]);
+        return $this->apiSuccess(
+            'Logged in successfully.',
+            $this->tokenPayload($token, $user),
+        );
     }
 
     /**
@@ -123,19 +120,16 @@ class AuthController extends Controller
 
         $token = $this->tokens->issuePasswordToken($payload['email'], $payload['password']);
 
-        return response()->json([
-            'message' => 'Logged in successfully.',
-            'data' => $this->tokenPayload($token, $user),
-        ]);
+        return $this->apiSuccess(
+            'Logged in successfully.',
+            $this->tokenPayload($token, $user),
+        );
     }
 
     public function me(Request $request): JsonResponse
     {
-        return response()->json([
-            'message' => 'Authenticated user retrieved successfully.',
-            'data' => [
-                'user' => new UserResource($request->user()),
-            ],
+        return $this->apiSuccess('Authenticated user retrieved successfully.', [
+            'user' => new UserResource($request->user()),
         ]);
     }
 
@@ -147,10 +141,7 @@ class AuthController extends Controller
             $token->revoke();
         }
 
-        return response()->json([
-            'message' => 'Logged out successfully.',
-            'data' => null,
-        ]);
+        return $this->apiSuccess('Logged out successfully.');
     }
 
     public function refresh(RefreshTokenRequest $request): JsonResponse
@@ -159,14 +150,11 @@ class AuthController extends Controller
             $request->string('refresh_token')->toString(),
         );
 
-        return response()->json([
-            'message' => 'Token refreshed successfully.',
-            'data' => [
-                'token_type' => $token['token_type'],
-                'expires_in' => $token['expires_in'],
-                'access_token' => $token['access_token'],
-                'refresh_token' => $token['refresh_token'],
-            ],
+        return $this->apiSuccess('Token refreshed successfully.', [
+            'token_type' => $token['token_type'],
+            'expires_in' => $token['expires_in'],
+            'access_token' => $token['access_token'],
+            'refresh_token' => $token['refresh_token'],
         ]);
     }
 

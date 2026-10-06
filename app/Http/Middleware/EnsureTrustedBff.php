@@ -22,19 +22,19 @@ class EnsureTrustedBff
         $secret = (string) config('services.frontend.bff_secret');
 
         if ($secret === '') {
-            abort(500, 'BFF secret is not configured.');
+            abort(Response::HTTP_INTERNAL_SERVER_ERROR, 'BFF secret is not configured.');
         }
 
         $provided = (string) $request->header('X-BFF-Secret', '');
 
         if ($provided === '' || ! hash_equals($secret, $provided)) {
-            abort(403, 'This API only accepts requests from the trusted application.');
+            abort(Response::HTTP_FORBIDDEN, 'This API only accepts requests from the trusted application.');
         }
 
         $origin = FrontendOrigins::normalize((string) $request->header('X-Frontend-Origin', ''));
 
         if ($origin === null || ! FrontendOrigins::contains($origin)) {
-            abort(403, 'This API only accepts requests from the trusted application.');
+            abort(Response::HTTP_FORBIDDEN, 'This API only accepts requests from the trusted application.');
         }
 
         return $next($request);

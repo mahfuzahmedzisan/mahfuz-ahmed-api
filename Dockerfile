@@ -18,9 +18,10 @@ RUN apt-get update \
         libjpeg62-turbo-dev \
         libonig-dev \
         libpng-dev \
+        libwebp-dev \
         libzip-dev \
         unzip \
-    && docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-configure gd --with-freetype --with-jpeg --with-webp \
     && docker-php-ext-install -j"$(nproc)" bcmath exif gd mbstring pcntl pdo_mysql zip \
     && pecl install redis \
     && docker-php-ext-enable opcache redis \
@@ -57,9 +58,11 @@ RUN apt-get update \
         libjpeg62-turbo \
         libonig5 \
         libpng16-16 \
+        libwebp7 \
         libzip4 \
         nginx \
         supervisor \
+        webp \
     && rm -rf /var/lib/apt/lists/* \
     && rm -f /etc/nginx/sites-enabled/default
 

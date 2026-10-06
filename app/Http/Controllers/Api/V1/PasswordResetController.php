@@ -21,10 +21,7 @@ class PasswordResetController extends Controller
     {
         Password::sendResetLink($request->only('email'));
 
-        return response()->json([
-            'message' => 'If an account exists for that email, a password reset link has been sent.',
-            'data' => null,
-        ]);
+        return $this->apiSuccess('If an account exists for that email, a password reset link has been sent.');
     }
 
     public function reset(ResetPasswordRequest $request, ResetsUserPasswords $resetter): JsonResponse
@@ -42,9 +39,6 @@ class PasswordResetController extends Controller
             ]);
         }
 
-        return response()->json([
-            'message' => 'Password has been reset successfully.',
-            'data' => null,
-        ]);
+        return $this->apiSuccess('Password has been reset successfully.');
     }
 }

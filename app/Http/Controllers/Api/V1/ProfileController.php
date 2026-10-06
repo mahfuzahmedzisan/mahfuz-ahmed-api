@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Laravel\Fortify\Contracts\UpdatesUserPasswords;
 use Laravel\Fortify\Contracts\UpdatesUserProfileInformation;
+use RuntimeException;
 use Throwable;
 
 class ProfileController extends Controller
@@ -19,11 +20,8 @@ class ProfileController extends Controller
     {
         $updater->update($request->user(), $request->all());
 
-        return response()->json([
-            'message' => 'Profile updated successfully.',
-            'data' => [
-                'user' => new UserResource($request->user()->fresh()),
-            ],
+        return $this->apiSuccess('Profile updated successfully.', [
+            'user' => new UserResource($request->user()->fresh()),
         ]);
     }
 
@@ -31,10 +29,7 @@ class ProfileController extends Controller
     {
         $updater->update($request->user(), $request->all());
 
-        return response()->json([
-            'message' => 'Password updated successfully.',
-            'data' => null,
-        ]);
+        return $this->apiSuccess('Password updated successfully.');
     }
 
     public function updatePreferences(Request $request): JsonResponse
@@ -49,18 +44,20 @@ class ProfileController extends Controller
         $user = $request->user();
         $user->fill($validated)->save();
 
-        return response()->json([
-            'message' => 'Preferences updated successfully.',
-            'data' => [
-                'user' => new UserResource($user->fresh()),
-            ],
+        return $this->apiSuccess('Preferences updated successfully.', [
+            'user' => new UserResource($user->fresh()),
         ]);
     }
 
     public function updateAvatar(Request $request, AvatarStorageService $avatars): JsonResponse
     {
         $request->validate([
-            'avatar' => ['required', 'image', 'max:5120'],
+            'avatar' => [
+                'required',
+                'file',
+                'max:5120',
+                'mimetypes:image/jpeg,image/png,image/gif,image/webp,image/bmp,image/svg+xml',
+            ],
         ]);
 
         /** @var User $user */
@@ -71,17 +68,15 @@ class ProfileController extends Controller
         } catch (Throwable $exception) {
             report($exception);
 
-            return response()->json([
-                'message' => 'Unable to process avatar.',
-                'data' => null,
-            ], 422);
+            return $this->apiUnprocessable(
+                $exception instanceof RuntimeException
+                    ? $exception->getMessage()
+                    : 'Unable to process avatar.',
+            );
         }
 
-        return response()->json([
-            'message' => 'Avatar updated successfully.',
-            'data' => [
-                'user' => new UserResource($user),
-            ],
+        return $this->apiSuccess('Avatar updated successfully.', [
+            'user' => new UserResource($user),
         ]);
     }
 
@@ -91,11 +86,8 @@ class ProfileController extends Controller
         $user = $request->user();
         $user = $avatars->delete($user);
 
-        return response()->json([
-            'message' => 'Avatar removed successfully.',
-            'data' => [
-                'user' => new UserResource($user),
-            ],
+        return $this->apiSuccess('Avatar removed successfully.', [
+            'user' => new UserResource($user),
         ]);
     }
 
@@ -117,9 +109,6 @@ class ProfileController extends Controller
         $user->tokens()->update(['revoked' => true]);
         $user->delete();
 
-        return response()->json([
-            'message' => 'Account deleted successfully.',
-            'data' => null,
-        ]);
+        return $this->apiSuccess('Account deleted successfully.');
     }
 }

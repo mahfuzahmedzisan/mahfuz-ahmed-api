@@ -4,10 +4,7 @@ namespace App\Services;
 
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use Spatie\Image\Enums\Fit;
-use Spatie\Image\Image;
 use Throwable;
 
 class AvatarStorageService
@@ -16,39 +13,37 @@ class AvatarStorageService
 
     public const QUALITY = 82;
 
+    public function __construct(private readonly ImageConversionService $images) {}
+
     /**
-     * Writes a new WebP first, persists the path, then deletes the previous
-     * file. A failed encode or save never removes the avatar the user already has.
+     * Writes the new avatar first, persists the path, then deletes the previous
+     * file. A failed encode never removes the avatar the user already has.
      */
     public function store(User $user, UploadedFile $file): User
     {
         $previous = $user->avatar;
-        $relative = 'avatars/'.$user->getKey().'/'.Str::ulid().'.webp';
-        $disk = Storage::disk('public');
-        $disk->makeDirectory('avatars/'.$user->getKey());
 
-        $absolute = $disk->path($relative);
+        $stored = $this->images->convertAndStore(
+            disk: 'public',
+            directory: 'avatars/'.$user->getKey(),
+            source: $file,
+            basename: (string) Str::ulid(),
+            options: new ImageConversionOptions(
+                width: self::SIZE,
+                height: self::SIZE,
+                quality: self::QUALITY,
+            ),
+        );
 
         try {
-            Image::load($file->getRealPath())
-                ->fit(Fit::Crop, self::SIZE, self::SIZE)
-                ->quality(self::QUALITY)
-                ->format('webp')
-                ->optimize()
-                ->save($absolute);
+            $user->forceFill(['avatar' => $stored->relativePath])->save();
         } catch (Throwable $exception) {
-            $this->deletePath($relative);
+            $this->images->deleteStoredPath('public', $stored->relativePath);
+
             throw $exception;
         }
 
-        try {
-            $user->forceFill(['avatar' => $relative])->save();
-        } catch (Throwable $exception) {
-            $this->deletePath($relative);
-            throw $exception;
-        }
-
-        if (is_string($previous) && $previous !== $relative) {
+        if (is_string($previous) && $previous !== $stored->relativePath) {
             $this->deletePath($previous);
         }
 
@@ -74,11 +69,7 @@ class AvatarStorageService
 
     public function deletePath(?string $path): void
     {
-        if (! $this->isAvatarPath($path)) {
-            return;
-        }
-
-        Storage::disk('public')->delete($path);
+        $this->images->deleteStoredPath('public', $path, fn (string $candidate): bool => $this->isAvatarPath($candidate));
     }
 
     public function isAvatarPath(?string $path): bool

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpFoundation\Response as HttpResponse;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class PassportTokenService
@@ -56,12 +57,12 @@ class PassportTokenService
         /** @var array<string, mixed> $payload */
         $payload = json_decode($response->getContent(), true) ?? [];
 
-        if ($response->getStatusCode() >= 400) {
+        if ($response->getStatusCode() >= HttpResponse::HTTP_BAD_REQUEST) {
             $message = is_string($payload['message'] ?? null)
                 ? $payload['message']
                 : 'Unable to issue access token.';
 
-            if ($response->getStatusCode() === 400 || $response->getStatusCode() === 401) {
+            if (in_array($response->getStatusCode(), [HttpResponse::HTTP_BAD_REQUEST, HttpResponse::HTTP_UNAUTHORIZED], true)) {
                 throw ValidationException::withMessages([
                     'email' => [$message],
                 ]);
@@ -85,7 +86,7 @@ class PassportTokenService
         $clientId = config('services.passport.password_client_id');
 
         if (! is_string($clientId) || $clientId === '') {
-            throw new HttpException(500, 'Passport password client is not configured.');
+            throw new HttpException(HttpResponse::HTTP_INTERNAL_SERVER_ERROR, 'Passport password client is not configured.');
         }
 
         return $clientId;
@@ -96,7 +97,7 @@ class PassportTokenService
         $clientSecret = config('services.passport.password_client_secret');
 
         if (! is_string($clientSecret) || $clientSecret === '') {
-            throw new HttpException(500, 'Passport password client is not configured.');
+            throw new HttpException(HttpResponse::HTTP_INTERNAL_SERVER_ERROR, 'Passport password client is not configured.');
         }
 
         return $clientSecret;
