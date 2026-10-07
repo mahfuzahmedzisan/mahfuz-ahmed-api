@@ -2,8 +2,10 @@
 
 use App\Http\Controllers\Api\V1\Admin\UserController;
 use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\BroadcastAuthController;
 use App\Http\Controllers\Api\V1\PasswordResetController;
 use App\Http\Controllers\Api\V1\ProfileController;
+use App\Http\Controllers\Api\V1\RealtimeController;
 use App\Http\Controllers\Api\V1\TwoFactorAuthenticationController;
 use App\Support\ApiResponse;
 use Illuminate\Http\Request;
@@ -21,6 +23,14 @@ Route::prefix('auth')->group(function (): void {
         Route::get('me', [AuthController::class, 'me']);
         Route::post('logout', [AuthController::class, 'logout']);
     });
+});
+
+Route::middleware('auth:api')->group(function (): void {
+    Route::post('broadcasting/auth', [BroadcastAuthController::class, 'authenticate']);
+
+    Route::get('realtime/ping', [RealtimeController::class, 'ping']);
+    Route::get('realtime/health', [RealtimeController::class, 'health']);
+    Route::post('realtime/test-notification', [RealtimeController::class, 'testNotification']);
 });
 
 Route::middleware('auth:api')->prefix('profile')->group(function (): void {
