@@ -2,7 +2,6 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -33,60 +32,19 @@ return new class extends Migration
             $table->timestamps();
         });
 
-        if (Schema::getConnection()->getDriverName() === 'mysql') {
+        $driver = Schema::getConnection()->getDriverName();
+
+        if ($driver === 'mysql') {
             Schema::table('media_items', function (Blueprint $table) {
                 $table->fullText('search_text');
             });
         }
 
-        if (! Schema::hasTable('videos')) {
-            return;
+        if ($driver === 'pgsql') {
+            Schema::table('media_items', function (Blueprint $table) {
+                $table->fullText('search_text')->language('english');
+            });
         }
-
-        $rows = DB::table('videos')->orderBy('id')->get();
-
-        foreach ($rows as $row) {
-            $search = trim(implode(' ', array_filter([$row->title, $row->slug])));
-
-            DB::table('media_items')->insert([
-                'id' => $row->id,
-                'ulid' => $row->ulid,
-                'title' => $row->title,
-                'slug' => $row->slug,
-                'kind' => 'video',
-                'alt' => null,
-                'keywords' => json_encode([]),
-                'search_text' => $search === '' ? null : mb_strtolower($search),
-                'status' => $row->status,
-                'progress' => $row->progress,
-                'error_message' => $row->error_message,
-                'mime' => null,
-                'extension' => null,
-                'size' => null,
-                'duration_seconds' => $row->duration_seconds,
-                'width' => $row->width,
-                'height' => $row->height,
-                'hls_path' => $row->hls_path,
-                'tus_id' => $row->tus_id,
-                'uploaded_by' => $row->uploaded_by,
-                'created_at' => $row->created_at,
-                'updated_at' => $row->updated_at,
-            ]);
-        }
-
-        $max = DB::table('media_items')->max('id');
-
-        if (is_numeric($max) && Schema::getConnection()->getDriverName() !== 'sqlite') {
-            DB::statement('ALTER TABLE media_items AUTO_INCREMENT = '.((int) $max + 1));
-        }
-
-        if (Schema::hasTable('media')) {
-            DB::table('media')
-                ->where('model_type', 'App\\Models\\Video')
-                ->update(['model_type' => 'App\\Models\\MediaItem']);
-        }
-
-        Schema::drop('videos');
     }
 
     public function down(): void
