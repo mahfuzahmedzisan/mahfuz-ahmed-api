@@ -2,12 +2,17 @@
 
 namespace App\Services;
 
+use Carbon\CarbonInterval;
+use Defuse\Crypto\Crypto;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\ValidationException;
+use Laravel\Passport\Passport;
+use League\OAuth2\Server\AuthorizationServer;
 use Symfony\Component\HttpFoundation\Response as HttpResponse;
 use Symfony\Component\HttpKernel\Exception\HttpException;
+use Throwable;
 
 class PassportTokenService
 {
@@ -22,18 +27,25 @@ class PassportTokenService
     /**
      * Exchange user credentials for a password-grant token pair.
      *
-     * @return array{token_type: string, expires_in: int, access_token: string, refresh_token: string|null}
+     * @return array{token_type: string, expires_in: int, access_token: string, refresh_token: string|null, session_ends_at: int}
      */
-    public function issuePasswordToken(string $email, string $password, string $scope = '*'): array
+    public function issuePasswordToken(string $email, string $password, string $scope = '*', bool $remember = false): array
     {
-        return $this->requestToken([
+        $lifetime = $remember ? CarbonInterval::days(30) : CarbonInterval::hours(12);
+        $sessionEndsAt = now()->add($lifetime)->getTimestamp();
+
+        $token = $this->withRefreshLifetime($lifetime, fn (): array => $this->requestToken([
             'grant_type' => 'password',
             'client_id' => $this->clientId(),
             'client_secret' => $this->clientSecret(),
             'username' => $email,
             'password' => $password,
             'scope' => $scope,
-        ]);
+        ]));
+
+        $token['session_ends_at'] = $sessionEndsAt;
+
+        return $token;
     }
 
     /**
@@ -55,13 +67,13 @@ class PassportTokenService
                     return $cached;
                 }
 
-                $token = $this->requestToken([
+                $token = $this->withRefreshLifetime($this->remainingRefreshLifetime($refreshToken), fn (): array => $this->requestToken([
                     'grant_type' => 'refresh_token',
                     'client_id' => $this->clientId(),
                     'client_secret' => $this->clientSecret(),
                     'refresh_token' => $refreshToken,
                     'scope' => $scope,
-                ]);
+                ]));
 
                 Cache::put($cacheKey, $token, now()->addSeconds(self::REFRESH_REUSE_SECONDS));
 
@@ -122,7 +134,6 @@ class PassportTokenService
     }
 
     /**
-     * @param  mixed  $value
      * @return ($value is array{token_type: string, expires_in: int, access_token: string, refresh_token: string|null} ? true : false)
      */
     private function isTokenPair(mixed $value): bool
@@ -133,6 +144,44 @@ class PassportTokenService
             && $value['access_token'] !== ''
             && isset($value['expires_in'])
             && is_int($value['expires_in']);
+    }
+
+    /**
+     * The OAuth grant copies the refresh lifetime when the authorization
+     * server is first built. Forget that instance so this request's interval
+     * is the one sealed into the new refresh token.
+     *
+     * @template T
+     *
+     * @param  callable(): T  $callback
+     * @return T
+     */
+    private function withRefreshLifetime(CarbonInterval|\DateInterval $lifetime, callable $callback): mixed
+    {
+        $previous = Passport::$refreshTokensExpireIn;
+        Passport::refreshTokensExpireIn($lifetime);
+        app()->forgetInstance(AuthorizationServer::class);
+
+        try {
+            return $callback();
+        } finally {
+            Passport::$refreshTokensExpireIn = $previous;
+            app()->forgetInstance(AuthorizationServer::class);
+        }
+    }
+
+    private function remainingRefreshLifetime(string $encryptedRefreshToken): \DateInterval
+    {
+        try {
+            $json = Crypto::decryptWithPassword($encryptedRefreshToken, (string) app('encrypter')->getKey());
+            $data = json_decode($json, true);
+            $expire = is_array($data) ? (int) ($data['expire_time'] ?? 0) : 0;
+            $seconds = max(1, $expire - time());
+
+            return new \DateInterval('PT'.$seconds.'S');
+        } catch (Throwable) {
+            return Passport::refreshTokensExpireIn();
+        }
     }
 
     private function clientId(): string

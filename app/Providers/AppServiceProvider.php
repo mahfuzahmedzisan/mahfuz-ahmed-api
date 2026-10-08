@@ -30,7 +30,7 @@ class AppServiceProvider extends ServiceProvider
     {
         Passport::enablePasswordGrant();
         Passport::tokensExpireIn(CarbonInterval::hours(1));
-        Passport::refreshTokensExpireIn(CarbonInterval::days(14));
+        Passport::refreshTokensExpireIn(CarbonInterval::days(30));
 
         $this->configureRateLimiting();
         $this->configurePasswordResetUrl();

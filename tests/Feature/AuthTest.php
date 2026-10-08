@@ -2,6 +2,8 @@
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Laravel\Passport\Client;
 use Laravel\Passport\ClientRepository;
 
@@ -247,6 +249,57 @@ it('requires a two factor challenge when the user has 2FA enabled', function ():
         ->assertJsonStructure([
             'data' => ['access_token', 'refresh_token', 'expires_in'],
         ]);
+});
+
+it('issues a 12 hour session unless remember me is checked', function (): void {
+    User::factory()->create([
+        'email' => 'hours@example.com',
+        'password' => 'Password1!',
+    ]);
+
+    $short = $this->postJson('/api/v1/auth/login', [
+        'email' => 'hours@example.com',
+        'password' => 'Password1!',
+    ])->assertOk()->json('data.session_ends_at');
+
+    expect($short)->toBeGreaterThan(now()->addHours(11)->getTimestamp())
+        ->toBeLessThan(now()->addHours(13)->getTimestamp());
+
+    $long = $this->postJson('/api/v1/auth/login', [
+        'email' => 'hours@example.com',
+        'password' => 'Password1!',
+        'remember' => true,
+    ])->assertOk()->json('data.session_ends_at');
+
+    expect($long)->toBeGreaterThan(now()->addDays(29)->getTimestamp())
+        ->toBeLessThan(now()->addDays(31)->getTimestamp());
+});
+
+it('does not extend the refresh deadline when the access token is renewed', function (): void {
+    User::factory()->create([
+        'email' => 'renew@example.com',
+        'password' => 'Password1!',
+    ]);
+
+    $login = $this->postJson('/api/v1/auth/login', [
+        'email' => 'renew@example.com',
+        'password' => 'Password1!',
+        'remember' => true,
+    ])->assertOk()->json('data');
+
+    $original = DB::table('oauth_refresh_tokens')->orderByDesc('expires_at')->value('expires_at');
+
+    $this->postJson('/api/v1/auth/refresh', [
+        'refresh_token' => $login['refresh_token'],
+    ])->assertOk();
+
+    $renewed = DB::table('oauth_refresh_tokens')
+        ->where('revoked', false)
+        ->orderByDesc('expires_at')
+        ->value('expires_at');
+
+    expect(Carbon::parse($renewed)->getTimestamp())
+        ->toBeLessThanOrEqual(Carbon::parse($original)->getTimestamp());
 });
 
 it('rejects an already-used two factor challenge token', function (): void {

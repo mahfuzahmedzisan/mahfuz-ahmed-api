@@ -61,13 +61,18 @@ class AuthController extends Controller
         if ($user->hasEnabledTwoFactorAuthentication()) {
             return $this->apiSuccess('Two factor authentication required.', [
                 'two_factor' => true,
-                'challenge_token' => $this->createChallengeToken($user, $credentials['password']),
+                'challenge_token' => $this->createChallengeToken(
+                    $user,
+                    $credentials['password'],
+                    $request->boolean('remember'),
+                ),
             ]);
         }
 
         $token = $this->tokens->issuePasswordToken(
             $credentials['email'],
             $credentials['password'],
+            remember: $request->boolean('remember'),
         );
 
         return $this->apiSuccess(
@@ -118,7 +123,11 @@ class AuthController extends Controller
 
         Cache::put($usedKey, true, now()->addMinutes(self::CHALLENGE_TTL_MINUTES + 1));
 
-        $token = $this->tokens->issuePasswordToken($payload['email'], $payload['password']);
+        $token = $this->tokens->issuePasswordToken(
+            $payload['email'],
+            $payload['password'],
+            remember: $payload['remember'],
+        );
 
         return $this->apiSuccess(
             'Logged in successfully.',
@@ -158,19 +167,20 @@ class AuthController extends Controller
         ]);
     }
 
-    private function createChallengeToken(User $user, string $password): string
+    private function createChallengeToken(User $user, string $password, bool $remember): string
     {
         return Crypt::encrypt([
             'user_id' => $user->id,
             'email' => $user->email,
             'password' => $password,
+            'remember' => $remember,
             'nonce' => Str::random(40),
             'expires_at' => now()->addMinutes(self::CHALLENGE_TTL_MINUTES)->getTimestamp(),
         ]);
     }
 
     /**
-     * @return array{user_id: int, email: string, password: string, nonce: string, expires_at: int}
+     * @return array{user_id: int, email: string, password: string, remember: bool, nonce: string, expires_at: int}
      */
     private function decryptChallengeToken(string $token): array
     {
@@ -194,6 +204,8 @@ class AuthController extends Controller
                 'challenge_token' => ['This login challenge has expired. Please log in again.'],
             ]);
         }
+
+        $payload['remember'] = (bool) ($payload['remember'] ?? false);
 
         return $payload;
     }
@@ -237,6 +249,7 @@ class AuthController extends Controller
             'expires_in' => $token['expires_in'],
             'access_token' => $token['access_token'],
             'refresh_token' => $token['refresh_token'] ?? null,
+            'session_ends_at' => $token['session_ends_at'] ?? null,
             'user' => new UserResource($user),
         ];
     }
