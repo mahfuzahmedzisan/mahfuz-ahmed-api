@@ -109,6 +109,24 @@ it('accepts an svg and stores it without script', function (): void {
     expect($stored)->not->toContain('<script')->toContain('circle');
 });
 
+it('stores a raster image as webp', function (): void {
+    if (! function_exists('imagewebp')) {
+        test()->markTestSkipped('GD WebP is not available.');
+    }
+
+    $png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==');
+    $result = finishUpload('photo.png', 'image/png', $png, 'Photo');
+
+    expect($result['response']->status())->toBe(200);
+    $item = MediaItem::query()->findOrFail($result['id']);
+    expect($item->extension)->toBe('webp');
+    expect($item->mime)->toBe('image/webp');
+    $path = (string) $item->getFirstMediaPath('source');
+    expect($path)->toEndWith('.webp');
+    $header = (string) file_get_contents($path, false, null, 0, 12);
+    expect($header)->toStartWith('RIFF')->toContain('WEBP');
+});
+
 it('rejects a file whose magic bytes do not match the extension', function (): void {
     $png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==');
     $result = finishUpload('photo.jpg', 'image/jpeg', $png);

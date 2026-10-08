@@ -64,6 +64,53 @@ class ImageConversionService
         return new StoredImageResult($relative, 'webp', $disk, 'image/webp');
     }
 
+    /**
+     * Encodes a raster image as WebP at its original size. SVG is not accepted.
+     */
+    public function encodeOriginalAsWebp(string $sourcePath, int $quality = 82): string
+    {
+        if ($this->svgSanitizer->isSvg($sourcePath)) {
+            throw new RuntimeException('SVG images stay SVG and are not converted to WebP.');
+        }
+
+        if (! $this->canEncodeWebp()) {
+            throw new RuntimeException('WebP encoding is unavailable. Enable GD WebP or install cwebp.');
+        }
+
+        [$readable, $cleanup] = $this->prepareReadableSource($sourcePath);
+        $temporary = tempnam(sys_get_temp_dir(), 'media-webp');
+
+        if ($temporary === false) {
+            $this->cleanup($cleanup);
+
+            throw new RuntimeException('Unable to prepare a WebP image.');
+        }
+
+        $destination = $temporary.'.webp';
+        @unlink($temporary);
+
+        try {
+            $this->writeWebp($readable, $destination, $quality);
+            $this->optimizeQuietly($destination);
+        } catch (Throwable $exception) {
+            if (is_file($destination)) {
+                @unlink($destination);
+            }
+
+            throw $exception;
+        } finally {
+            $this->cleanup($cleanup);
+        }
+
+        if (! is_file($destination) || filesize($destination) < 1) {
+            @unlink($destination);
+
+            throw new RuntimeException('This image could not be converted to WebP.');
+        }
+
+        return $destination;
+    }
+
     public function deleteStoredPath(string $disk, ?string $relativePath, ?callable $guard = null): void
     {
         if (! is_string($relativePath) || $relativePath === '') {
@@ -142,6 +189,29 @@ class ImageConversionService
         return [$dest, [$dest]];
     }
 
+    private function writeWebp(string $readable, string $absolute, int $quality): void
+    {
+        if (function_exists('imagewebp')) {
+            Image::load($readable)
+                ->quality($quality)
+                ->format('webp')
+                ->save($absolute);
+
+            return;
+        }
+
+        $staged = tempnam(sys_get_temp_dir(), 'image').'.png';
+
+        try {
+            Image::load($readable)->format('png')->save($staged);
+            $this->runCwebp($staged, $absolute, $quality);
+        } finally {
+            if (is_file($staged)) {
+                @unlink($staged);
+            }
+        }
+    }
+
     private function encodeWebp(string $readable, string $absolute, ImageConversionOptions $options): void
     {
         if (function_exists('imagewebp')) {
@@ -149,8 +219,8 @@ class ImageConversionService
                 ->fit($options->fit, $options->width, $options->height)
                 ->quality($options->quality)
                 ->format('webp')
-                ->optimize()
                 ->save($absolute);
+            $this->optimizeQuietly($absolute);
 
             return;
         }
@@ -163,23 +233,7 @@ class ImageConversionService
                 ->format('png')
                 ->save($staged);
 
-            $cwebp = $this->resolveBinary('cwebp');
-            if ($cwebp === null) {
-                throw new RuntimeException('cwebp is not available.');
-            }
-
-            $result = Process::timeout(30)->run([
-                $cwebp,
-                '-q',
-                (string) $options->quality,
-                $staged,
-                '-o',
-                $absolute,
-            ]);
-
-            if ($result->failed()) {
-                throw new RuntimeException(trim($result->errorOutput()) ?: 'cwebp failed.');
-            }
+            $this->runCwebp($staged, $absolute, $options->quality);
         } finally {
             if (is_file($staged)) {
                 @unlink($staged);
@@ -223,6 +277,27 @@ class ImageConversionService
 
         if (file_put_contents($absolute, $contents) === false) {
             throw new RuntimeException('Unable to store the image.');
+        }
+    }
+
+    private function runCwebp(string $source, string $absolute, int $quality): void
+    {
+        $cwebp = $this->resolveBinary('cwebp');
+        if ($cwebp === null) {
+            throw new RuntimeException('cwebp is not available.');
+        }
+
+        $result = Process::timeout(120)->run([
+            $cwebp,
+            '-q',
+            (string) $quality,
+            $source,
+            '-o',
+            $absolute,
+        ]);
+
+        if ($result->failed() || ! is_file($absolute)) {
+            throw new RuntimeException(trim($result->errorOutput()) ?: 'cwebp failed.');
         }
     }
 

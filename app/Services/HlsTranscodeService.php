@@ -63,7 +63,13 @@ final class HlsTranscodeService
             'error_message' => null,
         ])->save();
 
-        $item->getFirstMedia('source')?->delete();
+        $source = $item->getFirstMedia('source');
+        $sourcePath = $source?->getPath();
+        $source?->delete();
+
+        if (is_string($sourcePath) && is_file($sourcePath)) {
+            @unlink($sourcePath);
+        }
 
         $this->broadcast($item);
     }

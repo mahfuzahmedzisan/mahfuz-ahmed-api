@@ -7,7 +7,7 @@ use App\Enums\VideoStatus;
 use App\Http\Controllers\Controller;
 use App\Jobs\GenerateHlsJob;
 use App\Models\MediaItem;
-use App\Services\ImageSanitizer;
+use App\Services\ImageConversionService;
 use App\Services\MediaUploadTokenService;
 use App\Services\SvgSanitizer;
 use App\Support\AllowedMedia;
@@ -114,9 +114,14 @@ class TusHookController extends Controller
 
         if ($item->kind === MediaKind::Image) {
             try {
-                $storePath = $item->extension === 'svg'
-                    ? app(SvgSanitizer::class)->sanitize($path)
-                    : app(ImageSanitizer::class)->reencode($path, (string) $item->extension);
+                if ($item->extension === 'svg') {
+                    $storePath = app(SvgSanitizer::class)->sanitize($path);
+                } else {
+                    $storePath = app(ImageConversionService::class)->encodeOriginalAsWebp($path);
+                    $item->extension = 'webp';
+                    $item->mime = 'image/webp';
+                    $filename = pathinfo($filename, PATHINFO_FILENAME).'.webp';
+                }
             } catch (\RuntimeException $exception) {
                 @unlink($path);
                 @unlink($path.'.info');
@@ -137,6 +142,10 @@ class TusHookController extends Controller
 
         if ($storePath !== $path) {
             @unlink($path);
+        }
+
+        if (is_file($storePath)) {
+            @unlink($storePath);
         }
 
         @unlink($path.'.info');

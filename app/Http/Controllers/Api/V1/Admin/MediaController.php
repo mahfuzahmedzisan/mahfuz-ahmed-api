@@ -9,8 +9,9 @@ use App\Http\Requests\Api\V1\Admin\StoreMediaRequest;
 use App\Http\Requests\Api\V1\Admin\StoreMediaThumbnailRequest;
 use App\Http\Requests\Api\V1\Admin\UpdateMediaRequest;
 use App\Http\Resources\MediaResource;
+use App\Jobs\GenerateHlsJob;
 use App\Models\MediaItem;
-use App\Services\ImageSanitizer;
+use App\Services\ImageConversionService;
 use App\Services\MediaUploadTokenService;
 use App\Support\AllowedMedia;
 use App\Support\Query\BuildsApiListQuery;
@@ -153,11 +154,38 @@ class MediaController extends Controller
         return $this->apiSuccess('Media deleted successfully.');
     }
 
+    public function retry(MediaItem $mediaItem): JsonResponse
+    {
+        if (! $mediaItem->kind->streamsAsHls()) {
+            return $this->apiUnprocessable('Only audio and video can be converted again.');
+        }
+
+        if ($mediaItem->status !== VideoStatus::Failed) {
+            return $this->apiUnprocessable('This file is not waiting for another conversion.');
+        }
+
+        if ($mediaItem->getFirstMedia('source') === null) {
+            return $this->apiUnprocessable('The original file is no longer available.');
+        }
+
+        $mediaItem->forceFill([
+            'status' => VideoStatus::Uploaded,
+            'progress' => 0,
+            'error_message' => null,
+        ])->save();
+
+        GenerateHlsJob::dispatch($mediaItem->id);
+
+        return $this->apiSuccess('Conversion started again.', [
+            'media' => (new MediaResource($mediaItem))->resolve(),
+        ]);
+    }
+
     public function thumbnail(
         StoreMediaThumbnailRequest $request,
         MediaItem $mediaItem,
         UploadInspector $inspector,
-        ImageSanitizer $images,
+        ImageConversionService $images,
     ): JsonResponse {
         if (! $mediaItem->kind->streamsAsHls()) {
             return $this->apiUnprocessable('Only audio and video accept a thumbnail.');
@@ -172,7 +200,9 @@ class MediaController extends Controller
         $filename = $file->getClientOriginalName();
         $reason = AllowedMedia::rejectionReason($filename, (string) $file->getMimeType(), (int) $file->getSize());
 
-        if ($reason !== null || AllowedMedia::kindFor($filename) !== MediaKind::Image) {
+        $extension = AllowedMedia::extension($filename);
+
+        if ($reason !== null || ! in_array($extension, ['jpg', 'jpeg', 'png', 'webp', 'gif'], true)) {
             return $this->apiUnprocessable($reason ?? 'Thumbnails must be jpeg, png, webp, or gif.');
         }
 
@@ -189,14 +219,19 @@ class MediaController extends Controller
         }
 
         try {
-            $clean = $images->reencode($path, AllowedMedia::extension($filename));
+            $clean = $images->encodeOriginalAsWebp($path);
         } catch (\RuntimeException $exception) {
             return $this->apiUnprocessable($exception->getMessage());
         }
 
+        $mediaItem->clearMediaCollection('poster');
         $mediaItem->addMedia($clean)
-            ->usingFileName('thumbnail.'.AllowedMedia::extension($filename))
+            ->usingFileName('thumbnail.webp')
             ->toMediaCollection('poster');
+
+        if (is_file($clean)) {
+            @unlink($clean);
+        }
 
         return $this->apiSuccess('Thumbnail saved.', [
             'media' => (new MediaResource($mediaItem->fresh() ?? $mediaItem))->resolve(),

@@ -4,6 +4,7 @@ namespace App\Services;
 
 use DOMDocument;
 use DOMElement;
+use Illuminate\Http\UploadedFile;
 use RuntimeException;
 
 /**
@@ -23,6 +24,25 @@ final class SvgSanitizer
         'handler',
         'set',
     ];
+
+    public function isSvg(UploadedFile|string $source): bool
+    {
+        $path = $source instanceof UploadedFile ? $source->getRealPath() : $source;
+
+        if (! is_string($path) || ! is_file($path)) {
+            return false;
+        }
+
+        $head = file_get_contents($path, false, null, 0, 512);
+
+        if (! is_string($head)) {
+            return false;
+        }
+
+        $sample = strtolower(ltrim((string) preg_replace('/^\xEF\xBB\xBF/', '', $head)));
+
+        return str_contains(substr($sample, 0, 300), '<svg');
+    }
 
     public function sanitize(string $sourcePath): string
     {
