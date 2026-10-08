@@ -24,7 +24,8 @@
         "spatie/laravel-image-optimizer": "^1.8",
         "spatie/laravel-medialibrary": "^11.23",
         "spatie/laravel-query-builder": "^7.3",
-        "typesense/typesense-php": "^6.0"
+        "typesense/typesense-php": "^6.0",
+        "xenolope/quahog": "3.0"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",

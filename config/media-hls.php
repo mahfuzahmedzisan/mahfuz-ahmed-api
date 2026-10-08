@@ -22,4 +22,10 @@ return [
 
     'abandon_after_hours' => (int) env('VIDEO_ABANDON_AFTER_HOURS', 24),
 
+    /*
+     * Optional ClamAV daemon, for example unix:///var/run/clamav/clamd.ctl
+     * or tcp://127.0.0.1:3310. Empty skips the scan.
+     */
+    'clamav_socket' => env('CLAMAV_SOCKET'),
+
 ];

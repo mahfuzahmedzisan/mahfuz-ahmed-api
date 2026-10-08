@@ -2,36 +2,42 @@
 
 namespace App\Services;
 
-use App\Models\Video;
+use App\Models\MediaItem;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 
-final class VideoUploadTokenService
+final class MediaUploadTokenService
 {
     /**
-     * @return array{video_id: int, user_id: int}|null
+     * @return array{media_id: int, user_id: int}|null
      */
     public function find(string $token): ?array
     {
         $payload = Cache::get($this->key($token));
 
-        if (! is_array($payload) || ! isset($payload['video_id'], $payload['user_id'])) {
+        if (! is_array($payload) || ! isset($payload['user_id'])) {
+            return null;
+        }
+
+        $mediaId = (int) ($payload['media_id'] ?? $payload['video_id'] ?? 0);
+
+        if ($mediaId < 1) {
             return null;
         }
 
         return [
-            'video_id' => (int) $payload['video_id'],
+            'media_id' => $mediaId,
             'user_id' => (int) $payload['user_id'],
         ];
     }
 
-    public function issue(Video $video): string
+    public function issue(MediaItem $item): string
     {
         $token = Str::random(64);
 
         Cache::put($this->key($token), [
-            'video_id' => $video->id,
-            'user_id' => (int) $video->uploaded_by,
+            'media_id' => $item->id,
+            'user_id' => (int) $item->uploaded_by,
         ], now()->addSeconds((int) config('media-hls.token_ttl_seconds')));
 
         return $token;
@@ -44,6 +50,6 @@ final class VideoUploadTokenService
 
     private function key(string $token): string
     {
-        return 'video-upload:'.hash('sha256', $token);
+        return 'media-upload:'.hash('sha256', $token);
     }
 }

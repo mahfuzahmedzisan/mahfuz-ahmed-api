@@ -1,7 +1,7 @@
 <?php
 
+use App\Http\Controllers\Api\V1\Admin\MediaController;
 use App\Http\Controllers\Api\V1\Admin\UserController;
-use App\Http\Controllers\Api\V1\Admin\VideoController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\BroadcastAuthController;
 use App\Http\Controllers\Api\V1\PasswordResetController;
@@ -65,9 +65,10 @@ Route::middleware(['auth:api', 'role:admin', 'throttle:admin-users'])->group(fun
 
     Route::get('admin/users', [UserController::class, 'index']);
 
-    Route::get('admin/videos', [VideoController::class, 'index']);
-    Route::post('admin/videos', [VideoController::class, 'store']);
-    Route::get('admin/videos/{video}', [VideoController::class, 'show']);
-    Route::patch('admin/videos/{video}', [VideoController::class, 'update']);
-    Route::delete('admin/videos/{video}', [VideoController::class, 'destroy']);
+    Route::get('admin/media', [MediaController::class, 'index']);
+    Route::post('admin/media', [MediaController::class, 'store']);
+    Route::get('admin/media/{mediaItem}', [MediaController::class, 'show']);
+    Route::patch('admin/media/{mediaItem}', [MediaController::class, 'update']);
+    Route::delete('admin/media/{mediaItem}', [MediaController::class, 'destroy']);
+    Route::post('admin/media/{mediaItem}/thumbnail', [MediaController::class, 'thumbnail']);
 });

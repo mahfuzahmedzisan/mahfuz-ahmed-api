@@ -4,7 +4,7 @@ namespace App\Http\Requests\Api\V1\Admin;
 
 use Illuminate\Foundation\Http\FormRequest;
 
-class UpdateVideoRequest extends FormRequest
+class StoreMediaThumbnailRequest extends FormRequest
 {
     public function authorize(): bool
     {
@@ -17,7 +17,7 @@ class UpdateVideoRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'title' => ['required', 'string', 'max:160'],
+            'thumbnail' => ['required', 'file', 'max:8192'],
         ];
     }
 }

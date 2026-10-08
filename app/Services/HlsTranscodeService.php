@@ -5,36 +5,37 @@ namespace App\Services;
 use App\Contracts\EncodesHls;
 use App\Enums\VideoStatus;
 use App\Events\VideoProcessingUpdated;
-use App\Models\Video;
+use App\Models\MediaItem;
+use Illuminate\Support\Facades\Storage;
 use RuntimeException;
 
 final class HlsTranscodeService
 {
     public function __construct(private EncodesHls $encoder) {}
 
-    public function transcode(Video $video): void
+    public function transcode(MediaItem $item): void
     {
-        $media = $video->getFirstMedia('source');
+        $media = $item->getFirstMedia('source');
 
         if ($media === null) {
             throw new RuntimeException('Source media is missing.');
         }
 
-        $video->forceFill([
+        $item->forceFill([
             'status' => VideoStatus::Processing,
             'progress' => 0,
             'error_message' => null,
         ])->save();
-        $this->broadcast($video);
+        $this->broadcast($item);
 
         $last = -1;
-        $playlist = $video->hlsDirectory().'/master.m3u8';
+        $playlist = $item->hlsDirectory().'/master.m3u8';
 
         $result = $this->encoder->export(
             $media->disk,
             $media->getPathRelativeToRoot(),
             $playlist,
-            function (int $percent) use ($video, &$last): void {
+            function (int $percent) use ($item, &$last): void {
                 $percent = max(0, min(99, $percent));
 
                 if ($percent < $last + 5) {
@@ -42,12 +43,17 @@ final class HlsTranscodeService
                 }
 
                 $last = $percent;
-                $video->forceFill(['progress' => $percent])->save();
-                $this->broadcast($video);
+                $item->forceFill(['progress' => $percent])->save();
+                $this->broadcast($item);
             },
+            $item->kind->value,
         );
 
-        $video->forceFill([
+        if (! Storage::disk($media->disk)->exists($playlist)) {
+            throw new RuntimeException('HLS playlist was not written.');
+        }
+
+        $item->forceFill([
             'status' => VideoStatus::Ready,
             'progress' => 100,
             'hls_path' => $playlist,
@@ -56,12 +62,15 @@ final class HlsTranscodeService
             'height' => $result->height,
             'error_message' => null,
         ])->save();
-        $this->broadcast($video);
+
+        $item->getFirstMedia('source')?->delete();
+
+        $this->broadcast($item);
     }
 
-    public function broadcast(Video $video): void
+    public function broadcast(MediaItem $item): void
     {
-        $fresh = $video->fresh() ?? $video;
+        $fresh = $item->fresh() ?? $item;
 
         broadcast(new VideoProcessingUpdated(
             userId: (int) $fresh->uploaded_by,

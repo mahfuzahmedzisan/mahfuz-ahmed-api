@@ -3,7 +3,7 @@
 namespace App\Jobs;
 
 use App\Enums\VideoStatus;
-use App\Models\Video;
+use App\Models\MediaItem;
 use App\Services\HlsTranscodeService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -22,35 +22,35 @@ class GenerateHlsJob implements ShouldQueue
 
     public int $tries = 1;
 
-    public function __construct(public int $videoId)
+    public function __construct(public int $mediaId)
     {
         $this->onQueue('media');
     }
 
     public function handle(HlsTranscodeService $service): void
     {
-        $video = Video::query()->find($this->videoId);
+        $item = MediaItem::query()->find($this->mediaId);
 
-        if ($video === null || $video->status === VideoStatus::Ready) {
+        if ($item === null || $item->status === VideoStatus::Ready || ! $item->kind->streamsAsHls()) {
             return;
         }
 
-        $service->transcode($video);
+        $service->transcode($item);
     }
 
     public function failed(?Throwable $exception): void
     {
-        $video = Video::query()->find($this->videoId);
+        $item = MediaItem::query()->find($this->mediaId);
 
-        if ($video === null || $video->status === VideoStatus::Ready) {
+        if ($item === null || $item->status === VideoStatus::Ready) {
             return;
         }
 
-        $video->forceFill([
+        $item->forceFill([
             'status' => VideoStatus::Failed,
             'error_message' => $exception?->getMessage() ?: 'Transcode failed.',
         ])->save();
 
-        app(HlsTranscodeService::class)->broadcast($video);
+        app(HlsTranscodeService::class)->broadcast($item);
     }
 }

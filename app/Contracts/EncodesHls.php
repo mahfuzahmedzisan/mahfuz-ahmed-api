@@ -14,5 +14,6 @@ interface EncodesHls
         string $sourceRelativePath,
         string $playlistRelativePath,
         ?callable $onProgress = null,
+        string $kind = 'video',
     ): HlsEncodeResult;
 }

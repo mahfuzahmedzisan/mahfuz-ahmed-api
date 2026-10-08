@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Contracts\EncodesHls;
 use FFMpeg\Format\Video\X264;
+use Illuminate\Support\Facades\Process;
+use Illuminate\Support\Facades\Storage;
 use ProtoneMedia\LaravelFFMpeg\Exporters\HLSVideoFilters;
 use ProtoneMedia\LaravelFFMpeg\Support\FFMpeg;
 use Throwable;
@@ -15,7 +17,12 @@ final class FfmpegHlsEncoder implements EncodesHls
         string $sourceRelativePath,
         string $playlistRelativePath,
         ?callable $onProgress = null,
+        string $kind = 'video',
     ): HlsEncodeResult {
+        if ($kind === 'audio') {
+            return $this->exportAudio($disk, $sourceRelativePath, $playlistRelativePath, $onProgress);
+        }
+
         $width = null;
         $height = null;
         $duration = null;
@@ -61,6 +68,70 @@ final class FfmpegHlsEncoder implements EncodesHls
         $export->save($playlistRelativePath);
 
         return new HlsEncodeResult($duration, $width, $height);
+    }
+
+    private function exportAudio(
+        string $disk,
+        string $sourceRelativePath,
+        string $playlistRelativePath,
+        ?callable $onProgress,
+    ): HlsEncodeResult {
+        $source = Storage::disk($disk)->path($sourceRelativePath);
+        $playlistPath = Storage::disk($disk)->path($playlistRelativePath);
+        $root = dirname($playlistPath);
+
+        if (! is_dir($root) && ! mkdir($root, 0755, true) && ! is_dir($root)) {
+            throw new \RuntimeException('Unable to prepare the audio stream directory.');
+        }
+
+        $ffmpeg = (string) config('laravel-ffmpeg.ffmpeg.binaries');
+        $variants = [96, 160];
+        $lines = ['#EXTM3U', '#EXT-X-VERSION:3'];
+
+        foreach ($variants as $index => $kbps) {
+            $folder = $root.DIRECTORY_SEPARATOR.$kbps.'k';
+
+            if (! is_dir($folder) && ! mkdir($folder, 0755, true) && ! is_dir($folder)) {
+                throw new \RuntimeException('Unable to prepare an audio rendition.');
+            }
+
+            $playlist = $folder.DIRECTORY_SEPARATOR.'index.m3u8';
+            $result = Process::timeout(1800)->run([
+                $ffmpeg,
+                '-y',
+                '-i',
+                $source,
+                '-vn',
+                '-c:a',
+                'aac',
+                '-b:a',
+                $kbps.'k',
+                '-ac',
+                '2',
+                '-hls_time',
+                '10',
+                '-hls_playlist_type',
+                'vod',
+                '-hls_segment_filename',
+                $folder.DIRECTORY_SEPARATOR.'seg-%03d.aac',
+                $playlist,
+            ]);
+
+            if (! $result->successful() || ! is_file($playlist)) {
+                throw new \RuntimeException('Audio encoding failed.');
+            }
+
+            $lines[] = '#EXT-X-STREAM-INF:BANDWIDTH='.($kbps * 1000).',CODECS="mp4a.40.2"';
+            $lines[] = $kbps.'k/index.m3u8';
+
+            if ($onProgress !== null) {
+                $onProgress((int) round((($index + 1) / count($variants)) * 99));
+            }
+        }
+
+        Storage::disk($disk)->put($playlistRelativePath, implode("\n", $lines)."\n");
+
+        return new HlsEncodeResult(null, null, null);
     }
 
     /**

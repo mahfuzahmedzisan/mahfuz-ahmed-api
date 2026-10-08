@@ -4,7 +4,7 @@ namespace App\Http\Requests\Api\V1\Admin;
 
 use Illuminate\Foundation\Http\FormRequest;
 
-class StoreVideoRequest extends FormRequest
+class UpdateMediaRequest extends FormRequest
 {
     public function authorize(): bool
     {
@@ -18,11 +18,10 @@ class StoreVideoRequest extends FormRequest
     {
         return [
             'title' => ['required', 'string', 'max:160'],
-            'filename' => ['required', 'string', 'max:255'],
-            'size' => ['required', 'integer', 'min:1'],
-            'mime' => ['required', 'string', 'max:255'],
-            'file' => ['prohibited'],
-            'video' => ['prohibited'],
+            'slug' => ['required', 'string', 'max:180', 'regex:/^[a-z0-9]+(?:-[a-z0-9]+)*$/'],
+            'alt' => ['nullable', 'string', 'max:300'],
+            'keywords' => ['nullable', 'array', 'max:30'],
+            'keywords.*' => ['string', 'max:40'],
         ];
     }
 }

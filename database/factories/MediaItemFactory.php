@@ -2,18 +2,19 @@
 
 namespace Database\Factories;
 
+use App\Enums\MediaKind;
 use App\Enums\VideoStatus;
+use App\Models\MediaItem;
 use App\Models\User;
-use App\Models\Video;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Str;
 
 /**
- * @extends Factory<Video>
+ * @extends Factory<MediaItem>
  */
-class VideoFactory extends Factory
+class MediaItemFactory extends Factory
 {
-    protected $model = Video::class;
+    protected $model = MediaItem::class;
 
     /**
      * @return array<string, mixed>
@@ -26,6 +27,8 @@ class VideoFactory extends Factory
             'ulid' => (string) Str::ulid(),
             'title' => $title,
             'slug' => Str::slug($title).'-'.Str::lower(Str::random(6)),
+            'kind' => MediaKind::Video,
+            'keywords' => [],
             'status' => VideoStatus::AwaitingUpload,
             'progress' => 0,
             'uploaded_by' => User::factory(),
@@ -44,10 +47,17 @@ class VideoFactory extends Factory
         return $this->state(fn (array $attributes) => [
             'status' => VideoStatus::Ready,
             'progress' => 100,
-            'hls_path' => 'videos/'.$attributes['ulid'].'/hls/master.m3u8',
+            'hls_path' => 'media/'.$attributes['ulid'].'/hls/master.m3u8',
             'duration_seconds' => 12,
             'width' => 1280,
             'height' => 720,
+        ]);
+    }
+
+    public function audio(): static
+    {
+        return $this->state(fn () => [
+            'kind' => MediaKind::Audio,
         ]);
     }
 }

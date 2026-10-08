@@ -1,10 +1,11 @@
 <?php
 
 use App\Contracts\EncodesHls;
+use App\Enums\MediaKind;
 use App\Enums\VideoStatus;
 use App\Jobs\GenerateHlsJob;
+use App\Models\MediaItem;
 use App\Models\User;
-use App\Models\Video;
 use App\Services\HlsEncodeResult;
 use App\Services\HlsTranscodeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -14,17 +15,17 @@ use Illuminate\Support\Facades\Storage;
 
 uses(RefreshDatabase::class);
 
-function videoPayload(string $token, int $videoId, array $overrides = []): array
+function mediaPayload(string $token, int $mediaId, array $overrides = []): array
 {
     $upload = array_merge([
         'ID' => 'tus-upload-1',
-        'Size' => 128,
+        'Size' => 32,
         'SizeIsDeferred' => false,
         'Offset' => 0,
         'MetaData' => [
             'filename' => 'clip.mp4',
             'filetype' => 'video/mp4',
-            'video_id' => (string) $videoId,
+            'media_id' => (string) $mediaId,
         ],
         'Storage' => [
             'Path' => '',
@@ -44,29 +45,56 @@ function videoPayload(string $token, int $videoId, array $overrides = []): array
     ];
 }
 
-it('creates a video and an upload token without accepting a file body', function (): void {
+function mp4Bytes(): string
+{
+    return hex2bin('000000186674797069736f6d0000000069736f6d').'video';
+}
+
+function createMedia(array $extra = []): array
+{
     $admin = User::factory()->admin()->create();
 
-    $response = $this->actingAs($admin, 'api')->postJson('/api/v1/admin/videos', [
+    $created = test()->actingAs($admin, 'api')->postJson('/api/v1/admin/media', array_merge([
+        'title' => 'Clip',
+        'filename' => 'clip.mp4',
+        'size' => strlen(mp4Bytes()),
+        'mime' => 'video/mp4',
+    ], $extra))->assertCreated();
+
+    return [
+        'admin' => $admin,
+        'id' => (int) $created->json('data.media_id'),
+        'token' => (string) $created->json('data.upload_token'),
+    ];
+}
+
+it('creates a media item and an upload token without accepting a file body', function (): void {
+    $admin = User::factory()->admin()->create();
+
+    $response = $this->actingAs($admin, 'api')->postJson('/api/v1/admin/media', [
         'title' => 'Launch film',
         'filename' => 'launch.mp4',
         'size' => 2048,
         'mime' => 'video/mp4',
+        'alt' => 'Launch',
+        'keywords' => ['launch', 'film'],
     ])->assertCreated()
-        ->assertJsonPath('data.video.status', 'awaiting_upload')
-        ->assertJsonPath('data.video.stream_url', null)
+        ->assertJsonPath('data.media.status', 'awaiting_upload')
+        ->assertJsonPath('data.media.kind', 'video')
+        ->assertJsonPath('data.media.stream_url', null)
         ->assertJsonStructure([
-            'data' => ['video_id', 'tus_endpoint', 'upload_token', 'video'],
+            'data' => ['media_id', 'tus_endpoint', 'upload_token', 'media'],
         ]);
 
     expect($response->json('data.upload_token'))->toBeString()->not->toBeEmpty();
     expect($response->json('data.tus_endpoint'))->toEndWith('/tus/');
     expect($response->json('data.tus_endpoint'))->not->toStartWith('https://');
-    expect($response->json('data.video'))->not->toHaveKey('source_url');
+    expect($response->json('data.media'))->not->toHaveKey('source_url');
 
-    $this->assertDatabaseHas('videos', [
-        'id' => $response->json('data.video_id'),
+    $this->assertDatabaseHas('media_items', [
+        'id' => $response->json('data.media_id'),
         'status' => 'awaiting_upload',
+        'kind' => 'video',
         'uploaded_by' => $admin->id,
     ]);
 });
@@ -75,7 +103,7 @@ it('returns an https tus endpoint when the proxy terminated tls', function (): v
     $admin = User::factory()->admin()->create();
 
     $endpoint = $this->actingAs($admin, 'api')
-        ->postJson('/api/v1/admin/videos', [
+        ->postJson('/api/v1/admin/media', [
             'title' => 'Launch film',
             'filename' => 'launch.mp4',
             'size' => 2048,
@@ -89,10 +117,10 @@ it('returns an https tus endpoint when the proxy terminated tls', function (): v
     expect($endpoint)->toStartWith('https://')->toEndWith('/tus/');
 });
 
-it('rejects a multipart file on video create', function (): void {
+it('rejects a multipart file on media create', function (): void {
     $admin = User::factory()->admin()->create();
 
-    $this->actingAs($admin, 'api')->post('/api/v1/admin/videos', [
+    $this->actingAs($admin, 'api')->post('/api/v1/admin/media', [
         'title' => 'Launch film',
         'filename' => 'launch.mp4',
         'size' => 2048,
@@ -101,10 +129,10 @@ it('rejects a multipart file on video create', function (): void {
     ])->assertUnprocessable();
 });
 
-it('forbids a regular user and a missing bff secret from creating videos', function (): void {
+it('forbids a regular user and a missing bff secret from creating media', function (): void {
     $member = User::factory()->member()->create();
 
-    $this->actingAs($member, 'api')->postJson('/api/v1/admin/videos', [
+    $this->actingAs($member, 'api')->postJson('/api/v1/admin/media', [
         'title' => 'Nope',
         'filename' => 'nope.mp4',
         'size' => 10,
@@ -113,7 +141,7 @@ it('forbids a regular user and a missing bff secret from creating videos', funct
 
     $this->defaultHeaders = ['Accept' => 'application/json'];
 
-    $this->postJson('/api/v1/admin/videos', [
+    $this->postJson('/api/v1/admin/media', [
         'title' => 'Nope',
         'filename' => 'nope.mp4',
         'size' => 10,
@@ -122,28 +150,19 @@ it('forbids a regular user and a missing bff secret from creating videos', funct
         ->assertJsonPath('message', 'This API only accepts requests from the trusted application.');
 });
 
-it('rejects a pre-create hook with a bad token or a non-video', function (): void {
-    $admin = User::factory()->admin()->create();
-    $created = $this->actingAs($admin, 'api')->postJson('/api/v1/admin/videos', [
-        'title' => 'Clip',
-        'filename' => 'clip.mp4',
-        'size' => 128,
-        'mime' => 'video/mp4',
-    ])->assertCreated();
-
-    $videoId = (int) $created->json('data.video_id');
-    $token = (string) $created->json('data.upload_token');
+it('rejects a pre-create hook with a bad token or a disallowed type', function (): void {
+    $created = createMedia();
 
     $this->withHeaders(['X-Tus-Hook-Secret' => 'test-tus-secret'])
-        ->postJson('/internal/tus/pre-create', videoPayload('not-the-token', $videoId))
+        ->postJson('/internal/tus/pre-create', mediaPayload('not-the-token', $created['id']))
         ->assertForbidden();
 
     $this->withHeaders(['X-Tus-Hook-Secret' => 'test-tus-secret'])
-        ->postJson('/internal/tus/pre-create', videoPayload($token, $videoId, [
+        ->postJson('/internal/tus/pre-create', mediaPayload($created['token'], $created['id'], [
             'MetaData' => [
-                'filename' => 'notes.txt',
-                'filetype' => 'text/plain',
-                'video_id' => (string) $videoId,
+                'filename' => 'notes.zip',
+                'filetype' => 'application/zip',
+                'media_id' => (string) $created['id'],
             ],
         ]))
         ->assertUnprocessable();
@@ -153,45 +172,37 @@ it('stores the source and dispatches the media job when tus finishes', function 
     Storage::fake('public');
     Bus::fake();
 
-    $admin = User::factory()->admin()->create();
-    $created = $this->actingAs($admin, 'api')->postJson('/api/v1/admin/videos', [
-        'title' => 'Clip',
-        'filename' => 'clip.mp4',
-        'size' => 4,
-        'mime' => 'video/mp4',
-    ])->assertCreated();
-
-    $videoId = (int) $created->json('data.video_id');
-    $token = (string) $created->json('data.upload_token');
+    $created = createMedia();
     $path = tempnam(sys_get_temp_dir(), 'tus');
-    file_put_contents($path, 'fake');
+    $bytes = mp4Bytes();
+    file_put_contents($path, $bytes);
 
     $this->withHeaders(['X-Tus-Hook-Secret' => 'test-tus-secret'])
-        ->postJson('/internal/tus/pre-create', videoPayload($token, $videoId, [
-            'Size' => 4,
+        ->postJson('/internal/tus/pre-create', mediaPayload($created['token'], $created['id'], [
+            'Size' => strlen($bytes),
             'Storage' => ['Path' => $path],
         ]))
         ->assertOk();
 
     $this->withHeaders(['X-Tus-Hook-Secret' => 'test-tus-secret'])
-        ->postJson('/internal/tus/post-finish', videoPayload($token, $videoId, [
-            'Size' => 4,
-            'Offset' => 4,
+        ->postJson('/internal/tus/post-finish', mediaPayload($created['token'], $created['id'], [
+            'Size' => strlen($bytes),
+            'Offset' => strlen($bytes),
             'Storage' => ['Path' => $path],
         ]))
         ->assertOk();
 
-    $video = Video::query()->findOrFail($videoId);
+    $item = MediaItem::query()->findOrFail($created['id']);
 
-    expect($video->status)->toBe(VideoStatus::Uploaded);
-    expect($video->getFirstMedia('source'))->not->toBeNull();
+    expect($item->status)->toBe(VideoStatus::Uploaded);
+    expect($item->getFirstMedia('source'))->not->toBeNull();
 
-    Bus::assertDispatched(GenerateHlsJob::class, function (GenerateHlsJob $job) use ($videoId): bool {
-        return $job->videoId === $videoId && $job->queue === 'media';
+    Bus::assertDispatched(GenerateHlsJob::class, function (GenerateHlsJob $job) use ($created): bool {
+        return $job->mediaId === $created['id'] && $job->queue === 'media';
     });
 });
 
-it('marks a video ready from a mocked encoder and never plays the raw source', function (): void {
+it('marks a video ready from a mocked encoder and deletes the raw source', function (): void {
     Storage::fake('public');
 
     $this->app->instance(EncodesHls::class, new class implements EncodesHls
@@ -201,6 +212,7 @@ it('marks a video ready from a mocked encoder and never plays the raw source', f
             string $sourceRelativePath,
             string $playlistRelativePath,
             ?callable $onProgress = null,
+            string $kind = 'video',
         ): HlsEncodeResult {
             if ($onProgress !== null) {
                 $onProgress(40);
@@ -212,52 +224,110 @@ it('marks a video ready from a mocked encoder and never plays the raw source', f
         }
     });
 
-    $video = Video::factory()->uploaded()->create();
+    $item = MediaItem::factory()->uploaded()->create();
     $source = tempnam(sys_get_temp_dir(), 'src');
     file_put_contents($source, 'source-bytes');
-    $video->addMedia($source)->usingFileName('secret-source.mp4')->toMediaCollection('source');
+    $item->addMedia($source)->usingFileName('secret-source.mp4')->toMediaCollection('source');
 
-    (new GenerateHlsJob($video->id))->handle(app(HlsTranscodeService::class));
+    (new GenerateHlsJob($item->id))->handle(app(HlsTranscodeService::class));
 
-    $video->refresh();
+    $item->refresh();
 
-    expect($video->status)->toBe(VideoStatus::Ready);
-    expect($video->hls_path)->toEndWith('master.m3u8');
-    expect($video->progress)->toBe(100);
-    Storage::disk('public')->assertExists($video->hls_path);
+    expect($item->status)->toBe(VideoStatus::Ready);
+    expect($item->hls_path)->toEndWith('master.m3u8');
+    expect($item->progress)->toBe(100);
+    expect($item->getFirstMedia('source'))->toBeNull();
+    Storage::disk('public')->assertExists($item->hls_path);
 
     $admin = User::factory()->admin()->create();
 
     $payload = $this->actingAs($admin, 'api')
-        ->getJson('/api/v1/admin/videos/'.$video->id)
+        ->getJson('/api/v1/admin/media/'.$item->id)
         ->assertOk()
-        ->json('data.video');
+        ->json('data.media');
 
     expect($payload['stream_url'])->toContain('master.m3u8');
     expect(json_encode($payload))->not->toContain('secret-source');
 });
 
-it('deletes the video, its media, and the hls directory', function (): void {
+it('keeps the source when encoding fails', function (): void {
+    Storage::fake('public');
+
+    $this->app->instance(EncodesHls::class, new class implements EncodesHls
+    {
+        public function export(
+            string $disk,
+            string $sourceRelativePath,
+            string $playlistRelativePath,
+            ?callable $onProgress = null,
+            string $kind = 'video',
+        ): HlsEncodeResult {
+            throw new RuntimeException('encoder blew up');
+        }
+    });
+
+    $item = MediaItem::factory()->uploaded()->audio()->create();
+    $source = tempnam(sys_get_temp_dir(), 'src');
+    file_put_contents($source, 'source-bytes');
+    $item->addMedia($source)->usingFileName('secret-source.mp3')->toMediaCollection('source');
+
+    $job = new GenerateHlsJob($item->id);
+
+    expect(fn () => $job->handle(app(HlsTranscodeService::class)))->toThrow(RuntimeException::class);
+
+    $job->failed(new RuntimeException('encoder blew up'));
+    $item->refresh();
+
+    expect($item->status)->toBe(VideoStatus::Failed);
+    expect($item->kind)->toBe(MediaKind::Audio);
+    expect($item->getFirstMedia('source'))->not->toBeNull();
+});
+
+it('deletes the media item, its files, and the hls directory', function (): void {
     Storage::fake('public');
 
     $admin = User::factory()->admin()->create();
-    $video = Video::factory()->ready()->create(['uploaded_by' => $admin->id]);
-    Storage::disk('public')->put($video->hls_path, "#EXTM3U\n");
+    $item = MediaItem::factory()->ready()->create(['uploaded_by' => $admin->id]);
+    Storage::disk('public')->put($item->hls_path, "#EXTM3U\n");
     $source = tempnam(sys_get_temp_dir(), 'src');
     file_put_contents($source, 'source-bytes');
-    $video->addMedia($source)->usingFileName('secret-source.mp4')->toMediaCollection('source');
+    $item->addMedia($source)->usingFileName('secret-source.mp4')->toMediaCollection('source');
 
     $this->actingAs($admin, 'api')
-        ->deleteJson('/api/v1/admin/videos/'.$video->id)
+        ->deleteJson('/api/v1/admin/media/'.$item->id)
         ->assertOk();
 
-    $this->assertDatabaseMissing('videos', ['id' => $video->id]);
-    $this->assertDatabaseMissing('media', ['model_id' => $video->id, 'model_type' => Video::class]);
-    Storage::disk('public')->assertMissing($video->hls_path);
+    $this->assertDatabaseMissing('media_items', ['id' => $item->id]);
+    $this->assertDatabaseMissing('media', ['model_id' => $item->id, 'model_type' => MediaItem::class]);
+    Storage::disk('public')->assertMissing($item->hls_path);
 });
 
 it('rejects tus hooks that omit the shared secret', function (): void {
-    $this->postJson('/internal/tus/pre-create', videoPayload('token', 1))
+    $this->postJson('/internal/tus/pre-create', mediaPayload('token', 1))
         ->assertForbidden()
         ->assertJsonPath('message', 'Invalid tus hook secret.');
+});
+
+it('finds media by keyword', function (): void {
+    $admin = User::factory()->admin()->create();
+    MediaItem::factory()->create([
+        'uploaded_by' => $admin->id,
+        'title' => 'Studio take',
+        'slug' => 'studio-take',
+        'keywords' => ['interview', 'podcast'],
+        'kind' => MediaKind::Audio,
+        'status' => VideoStatus::Ready,
+    ]);
+    MediaItem::factory()->create([
+        'uploaded_by' => $admin->id,
+        'title' => 'Other',
+        'slug' => 'other-file',
+        'keywords' => ['poster'],
+    ]);
+
+    $this->actingAs($admin, 'api')
+        ->getJson('/api/v1/admin/media?filter[q]=podcast&filter[kind]=audio')
+        ->assertOk()
+        ->assertJsonPath('data.meta.total', 1)
+        ->assertJsonPath('data.media.0.slug', 'studio-take');
 });

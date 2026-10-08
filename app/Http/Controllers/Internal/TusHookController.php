@@ -2,19 +2,22 @@
 
 namespace App\Http\Controllers\Internal;
 
+use App\Enums\MediaKind;
 use App\Enums\VideoStatus;
 use App\Http\Controllers\Controller;
 use App\Jobs\GenerateHlsJob;
-use App\Models\Video;
-use App\Services\VideoUploadTokenService;
-use App\Support\AllowedVideo;
+use App\Models\MediaItem;
+use App\Services\ImageSanitizer;
+use App\Services\MediaUploadTokenService;
+use App\Support\AllowedMedia;
+use App\Support\UploadInspector;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 
 class TusHookController extends Controller
 {
-    public function __invoke(Request $request, VideoUploadTokenService $tokens, ?string $hook = null): JsonResponse
+    public function __invoke(Request $request, MediaUploadTokenService $tokens, ?string $hook = null): JsonResponse
     {
         $name = strtolower($hook ?: (string) $request->header('Hook-Name', (string) $request->input('Type', '')));
 
@@ -26,13 +29,13 @@ class TusHookController extends Controller
         };
     }
 
-    private function preCreate(Request $request, VideoUploadTokenService $tokens): JsonResponse
+    private function preCreate(Request $request, MediaUploadTokenService $tokens): JsonResponse
     {
         $upload = $this->upload($request);
-        $video = $this->authorizedVideo($request, $tokens, $upload);
+        $item = $this->authorizedItem($request, $tokens, $upload);
 
-        if ($video instanceof JsonResponse) {
-            return $video;
+        if ($item instanceof JsonResponse) {
+            return $item;
         }
 
         $filename = (string) ($upload['MetaData']['filename'] ?? '');
@@ -44,41 +47,45 @@ class TusHookController extends Controller
             return $this->reject(422, 'The upload must include a total length.');
         }
 
-        $reason = AllowedVideo::rejectionReason($filename, $mime, $size);
+        $reason = AllowedMedia::rejectionReason($filename, $mime, $size);
 
         if ($reason !== null) {
             return $this->reject(422, $reason);
         }
 
-        if ($video->status !== VideoStatus::AwaitingUpload) {
-            return $this->reject(409, 'This video is not waiting for an upload.');
+        if (AllowedMedia::extension($filename) !== $item->extension) {
+            return $this->reject(422, 'The uploaded file does not match this library item.');
+        }
+
+        if ($item->status !== VideoStatus::AwaitingUpload) {
+            return $this->reject(409, 'This file is not waiting for an upload.');
         }
 
         $tusId = (string) ($upload['ID'] ?? '');
 
         if ($tusId !== '') {
-            $video->forceFill(['tus_id' => $tusId])->save();
+            $item->forceFill(['tus_id' => $tusId])->save();
         }
 
         return response()->json(['ok' => true]);
     }
 
-    private function postFinish(Request $request, VideoUploadTokenService $tokens): JsonResponse
+    private function postFinish(Request $request, MediaUploadTokenService $tokens): JsonResponse
     {
         $upload = $this->upload($request);
-        $video = $this->videoFromMetadata($upload);
+        $item = $this->itemFromMetadata($upload);
 
-        if ($video === null) {
-            return $this->reject(404, 'Video was not found.');
+        if ($item === null) {
+            return $this->reject(404, 'Media was not found.');
         }
 
-        if ($video->status !== VideoStatus::AwaitingUpload) {
+        if ($item->status !== VideoStatus::AwaitingUpload) {
             return response()->json(['ok' => true]);
         }
 
         $granted = $tokens->find($this->bearer($request));
 
-        if ($granted === null || $granted['video_id'] !== $video->id) {
+        if ($granted === null || $granted['media_id'] !== $item->id) {
             return $this->reject(403, 'Upload token is invalid.');
         }
 
@@ -88,23 +95,68 @@ class TusHookController extends Controller
             return $this->reject(422, 'Finished upload file is missing.');
         }
 
-        $filename = $this->storedFilename((string) ($upload['MetaData']['filename'] ?? 'video.mp4'));
+        $filename = (string) ($upload['MetaData']['filename'] ?? 'file.bin');
+        $reason = app(UploadInspector::class)->rejectionReason($path, $filename);
 
-        $video->addMedia($path)
-            ->usingFileName($filename)
+        if ($reason !== null) {
+            @unlink($path);
+            @unlink($path.'.info');
+            $item->forceFill([
+                'status' => VideoStatus::Failed,
+                'error_message' => $reason,
+            ])->save();
+
+            return $this->reject(422, $reason);
+        }
+
+        $storePath = $path;
+
+        if ($item->kind === MediaKind::Image) {
+            try {
+                $storePath = app(ImageSanitizer::class)->reencode($path, (string) $item->extension);
+            } catch (\RuntimeException $exception) {
+                @unlink($path);
+                @unlink($path.'.info');
+                $item->forceFill([
+                    'status' => VideoStatus::Failed,
+                    'error_message' => $exception->getMessage(),
+                ])->save();
+
+                return $this->reject(422, $exception->getMessage());
+            }
+        }
+
+        $storedName = $this->storedFilename($filename);
+
+        $item->addMedia($storePath)
+            ->usingFileName($storedName)
             ->toMediaCollection('source');
+
+        if ($storePath !== $path) {
+            @unlink($path);
+        }
 
         @unlink($path.'.info');
 
-        $video->forceFill([
-            'status' => VideoStatus::Uploaded,
-            'tus_id' => (string) ($upload['ID'] ?? $video->tus_id),
+        $source = $item->getFirstMedia('source');
+        $dimensions = $this->imageDimensions($item);
+
+        $item->forceFill([
+            'status' => $item->kind->streamsAsHls() ? VideoStatus::Uploaded : VideoStatus::Ready,
+            'progress' => $item->kind->streamsAsHls() ? 0 : 100,
+            'tus_id' => (string) ($upload['ID'] ?? $item->tus_id),
+            'size' => $source?->size ?: $item->size,
+            'mime' => $source?->mime_type ?: $item->mime,
+            'width' => $dimensions['width'] ?? $item->width,
+            'height' => $dimensions['height'] ?? $item->height,
             'error_message' => null,
         ])->save();
 
         $tokens->forget($this->bearer($request));
 
-        GenerateHlsJob::dispatch($video->id);
+        if ($item->kind->streamsAsHls()) {
+            GenerateHlsJob::dispatch($item->id);
+        }
 
         return response()->json(['ok' => true]);
     }
@@ -112,15 +164,15 @@ class TusHookController extends Controller
     private function postTerminate(Request $request): JsonResponse
     {
         $upload = $this->upload($request);
-        $video = $this->videoFromMetadata($upload);
+        $item = $this->itemFromMetadata($upload);
 
-        if ($video === null) {
+        if ($item === null) {
             $tusId = (string) ($upload['ID'] ?? '');
-            $video = $tusId === '' ? null : Video::query()->where('tus_id', $tusId)->first();
+            $item = $tusId === '' ? null : MediaItem::query()->where('tus_id', $tusId)->first();
         }
 
-        if ($video !== null && $video->status === VideoStatus::AwaitingUpload) {
-            $video->delete();
+        if ($item !== null && $item->status === VideoStatus::AwaitingUpload) {
+            $item->delete();
         }
 
         return response()->json(['ok' => true]);
@@ -129,7 +181,7 @@ class TusHookController extends Controller
     /**
      * @param  array<string, mixed>  $upload
      */
-    private function authorizedVideo(Request $request, VideoUploadTokenService $tokens, array $upload): Video|JsonResponse
+    private function authorizedItem(Request $request, MediaUploadTokenService $tokens, array $upload): MediaItem|JsonResponse
     {
         $granted = $tokens->find($this->bearer($request));
 
@@ -137,13 +189,13 @@ class TusHookController extends Controller
             return $this->reject(403, 'Upload token is invalid.');
         }
 
-        $video = $this->videoFromMetadata($upload);
+        $item = $this->itemFromMetadata($upload);
 
-        if ($video === null || $granted['video_id'] !== $video->id || $granted['user_id'] !== (int) $video->uploaded_by) {
+        if ($item === null || $granted['media_id'] !== $item->id || $granted['user_id'] !== (int) $item->uploaded_by) {
             return $this->reject(403, 'Upload token is invalid.');
         }
 
-        return $video;
+        return $item;
     }
 
     /**
@@ -159,16 +211,16 @@ class TusHookController extends Controller
     /**
      * @param  array<string, mixed>  $upload
      */
-    private function videoFromMetadata(array $upload): ?Video
+    private function itemFromMetadata(array $upload): ?MediaItem
     {
         $metadata = $upload['MetaData'] ?? [];
-        $videoId = is_array($metadata) ? (int) ($metadata['video_id'] ?? 0) : 0;
+        $mediaId = is_array($metadata) ? (int) ($metadata['media_id'] ?? $metadata['video_id'] ?? 0) : 0;
 
-        if ($videoId < 1) {
+        if ($mediaId < 1) {
             return null;
         }
 
-        return Video::query()->find($videoId);
+        return MediaItem::query()->find($mediaId);
     }
 
     private function bearer(Request $request): string
@@ -196,10 +248,35 @@ class TusHookController extends Controller
 
     private function storedFilename(string $original): string
     {
-        $extension = strtolower(pathinfo($original, PATHINFO_EXTENSION));
-        $base = Str::slug(pathinfo($original, PATHINFO_FILENAME)) ?: 'video';
+        $extension = AllowedMedia::extension($original);
+        $base = Str::slug(pathinfo($original, PATHINFO_FILENAME)) ?: 'media';
 
         return $extension === '' ? $base : $base.'.'.$extension;
+    }
+
+    /**
+     * @return array{width: int, height: int}|null
+     */
+    private function imageDimensions(MediaItem $item): ?array
+    {
+        if ($item->kind !== MediaKind::Image) {
+            return null;
+        }
+
+        $media = $item->getFirstMedia('source');
+        $path = $media?->getPath();
+
+        if (! is_string($path) || ! is_file($path)) {
+            return null;
+        }
+
+        $size = @getimagesize($path);
+
+        if (! is_array($size)) {
+            return null;
+        }
+
+        return ['width' => (int) $size[0], 'height' => (int) $size[1]];
     }
 
     private function reject(int $status, string $message): JsonResponse

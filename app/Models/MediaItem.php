@@ -2,8 +2,9 @@
 
 namespace App\Models;
 
+use App\Enums\MediaKind;
 use App\Enums\VideoStatus;
-use Database\Factories\VideoFactory;
+use Database\Factories\MediaItemFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -15,14 +16,23 @@ use Spatie\MediaLibrary\InteractsWithMedia;
 
 /**
  * @property VideoStatus $status
+ * @property MediaKind $kind
+ * @property list<string>|null $keywords
  */
 #[Fillable([
     'ulid',
     'title',
     'slug',
+    'kind',
+    'alt',
+    'keywords',
+    'search_text',
     'status',
     'progress',
     'error_message',
+    'mime',
+    'extension',
+    'size',
     'duration_seconds',
     'width',
     'height',
@@ -30,9 +40,9 @@ use Spatie\MediaLibrary\InteractsWithMedia;
     'tus_id',
     'uploaded_by',
 ])]
-class Video extends Model implements HasMedia
+class MediaItem extends Model implements HasMedia
 {
-    /** @use HasFactory<VideoFactory> */
+    /** @use HasFactory<MediaItemFactory> */
     use HasFactory, InteractsWithMedia;
 
     protected $attributes = [
@@ -42,21 +52,26 @@ class Video extends Model implements HasMedia
 
     protected static function booted(): void
     {
-        static::creating(function (Video $video): void {
-            if (! $video->ulid) {
-                $video->ulid = (string) Str::ulid();
+        static::saving(function (MediaItem $item): void {
+            $item->search_text = $item->compiledSearchText();
+        });
+
+        static::creating(function (MediaItem $item): void {
+            if (! $item->ulid) {
+                $item->ulid = (string) Str::ulid();
             }
         });
 
-        static::deleting(function (Video $video): void {
-            if ($video->ulid) {
-                Storage::disk('public')->deleteDirectory('videos/'.$video->ulid);
+        static::deleting(function (MediaItem $item): void {
+            if ($item->ulid) {
+                Storage::disk('public')->deleteDirectory('media/'.$item->ulid);
+                Storage::disk('public')->deleteDirectory('videos/'.$item->ulid);
             }
 
-            if ($video->tus_id) {
+            if ($item->tus_id) {
                 $directory = rtrim((string) config('media-hls.upload_dir'), DIRECTORY_SEPARATOR);
-                @unlink($directory.DIRECTORY_SEPARATOR.$video->tus_id);
-                @unlink($directory.DIRECTORY_SEPARATOR.$video->tus_id.'.info');
+                @unlink($directory.DIRECTORY_SEPARATOR.$item->tus_id);
+                @unlink($directory.DIRECTORY_SEPARATOR.$item->tus_id.'.info');
             }
         });
     }
@@ -67,8 +82,11 @@ class Video extends Model implements HasMedia
     protected function casts(): array
     {
         return [
+            'kind' => MediaKind::class,
+            'keywords' => 'array',
             'status' => VideoStatus::class,
             'progress' => 'integer',
+            'size' => 'integer',
             'duration_seconds' => 'integer',
             'width' => 'integer',
             'height' => 'integer',
@@ -93,7 +111,7 @@ class Video extends Model implements HasMedia
 
     public static function uniqueSlug(string $title, ?int $ignoreId = null): string
     {
-        $base = Str::slug($title) ?: 'video';
+        $base = Str::slug($title) ?: 'media';
         $slug = $base;
         $suffix = 2;
 
@@ -108,18 +126,49 @@ class Video extends Model implements HasMedia
         return $slug;
     }
 
+    /**
+     * @param  list<string>  $keywords
+     */
+    public static function normalizeKeywords(array $keywords): array
+    {
+        $clean = [];
+
+        foreach ($keywords as $keyword) {
+            $value = trim($keyword);
+
+            if ($value === '') {
+                continue;
+            }
+
+            $clean[mb_strtolower($value)] = $value;
+        }
+
+        return array_values($clean);
+    }
+
     public function hlsDirectory(): string
     {
-        return 'videos/'.$this->ulid.'/hls';
+        return 'media/'.$this->ulid.'/hls';
     }
 
     public function streamUrl(): ?string
     {
-        if ($this->status !== VideoStatus::Ready || ! $this->hls_path) {
+        if (! $this->kind->streamsAsHls() || $this->status !== VideoStatus::Ready || ! $this->hls_path) {
             return null;
         }
 
         return Storage::disk('public')->url($this->hls_path);
+    }
+
+    public function fileUrl(): ?string
+    {
+        if ($this->kind->streamsAsHls()) {
+            return $this->streamUrl();
+        }
+
+        $url = $this->getFirstMediaUrl('source');
+
+        return $url !== '' ? $url : null;
     }
 
     public function posterUrl(): ?string
@@ -127,5 +176,18 @@ class Video extends Model implements HasMedia
         $url = $this->getFirstMediaUrl('poster');
 
         return $url !== '' ? $url : null;
+    }
+
+    public function compiledSearchText(): string
+    {
+        $keywords = is_array($this->keywords) ? implode(' ', $this->keywords) : '';
+        $text = trim(implode(' ', array_filter([
+            $this->title,
+            $this->slug,
+            $this->alt,
+            $keywords,
+        ])));
+
+        return mb_strtolower($text);
     }
 }
