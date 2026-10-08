@@ -16,28 +16,31 @@ final class FfmpegHlsEncoder implements EncodesHls
         string $playlistRelativePath,
         ?callable $onProgress = null,
     ): HlsEncodeResult {
-        $opened = FFMpeg::fromDisk($disk)->open($sourceRelativePath);
-
         $width = null;
         $height = null;
         $duration = null;
 
         try {
-            $stream = $opened->getVideoStream();
+            // Probe on its own opener. Reading the stream opens the file as a
+            // normal video. exportForHLS needs a fresh opener so it can open
+            // the same file as advanced media; reusing this one makes save()
+            // pass VideoMedia into AdvancedOutputMapping.
+            $probe = FFMpeg::fromDisk($disk)->open($sourceRelativePath);
+            $stream = $probe->getVideoStream();
             if ($stream !== null) {
                 $dimensions = $stream->getDimensions();
                 $width = $dimensions->getWidth();
                 $height = $dimensions->getHeight();
             }
 
-            $duration = (int) round($opened->getDurationInSeconds());
+            $duration = (int) round($probe->getDurationInSeconds());
         } catch (Throwable) {
             $width = null;
             $height = null;
             $duration = null;
         }
 
-        $export = $opened->exportForHLS()->setSegmentLength(10);
+        $export = FFMpeg::fromDisk($disk)->open($sourceRelativePath)->exportForHLS()->setSegmentLength(10);
 
         if ($onProgress !== null) {
             $export->onProgress(function ($percentage) use ($onProgress): void {
