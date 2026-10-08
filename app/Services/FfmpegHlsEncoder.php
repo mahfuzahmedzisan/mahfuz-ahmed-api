@@ -55,13 +55,15 @@ final class FfmpegHlsEncoder implements EncodesHls
             });
         }
 
-        foreach ($this->rungs($height) as $rung) {
+        foreach ($this->rungs($width, $height) as $rung) {
             $format = (new X264)
                 ->setKiloBitrate($rung['video'])
                 ->setAudioKiloBitrate($rung['audio']);
 
             $export->addFormat($format, function (HLSVideoFilters $filters) use ($rung): void {
-                $filters->resize($rung['width'], $rung['height']);
+                $filters->addFilter(function ($complex, string $in, string $out) use ($rung): void {
+                    $complex->custom($in, self::scaleFilter($rung['width'], $rung['height']), $out);
+                });
             });
         }
 
@@ -135,11 +137,20 @@ final class FfmpegHlsEncoder implements EncodesHls
     }
 
     /**
-     * 1080p is omitted when the source is shorter. At least one rung always remains.
+     * Fits inside the rung and keeps the source shape. A tall video stays tall.
+     */
+    public static function scaleFilter(int $maxWidth, int $maxHeight): string
+    {
+        return "scale=w={$maxWidth}:h={$maxHeight}:force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1";
+    }
+
+    /**
+     * A rung is skipped when both of its sides are larger than the source.
+     * At least one rung always remains.
      *
      * @return list<array{width: int, height: int, video: int, audio: int}>
      */
-    private function rungs(?int $sourceHeight): array
+    private function rungs(?int $sourceWidth, ?int $sourceHeight): array
     {
         $ladder = [
             ['width' => 640, 'height' => 360, 'video' => 800, 'audio' => 96],
@@ -147,13 +158,18 @@ final class FfmpegHlsEncoder implements EncodesHls
             ['width' => 1920, 'height' => 1080, 'video' => 5000, 'audio' => 192],
         ];
 
-        if ($sourceHeight === null) {
+        if ($sourceWidth === null || $sourceHeight === null) {
             return $ladder;
         }
 
         $fitting = array_values(array_filter(
             $ladder,
-            fn (array $rung): bool => $rung['height'] <= $sourceHeight,
+            function (array $rung) use ($sourceWidth, $sourceHeight): bool {
+                $asLandscape = $sourceWidth >= $rung['width'] && $sourceHeight >= $rung['height'];
+                $asPortrait = $sourceHeight >= $rung['width'] && $sourceWidth >= $rung['height'];
+
+                return $asLandscape || $asPortrait;
+            },
         ));
 
         return $fitting === [] ? [$ladder[0]] : $fitting;
