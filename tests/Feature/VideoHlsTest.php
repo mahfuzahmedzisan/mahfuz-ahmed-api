@@ -61,6 +61,7 @@ it('creates a video and an upload token without accepting a file body', function
 
     expect($response->json('data.upload_token'))->toBeString()->not->toBeEmpty();
     expect($response->json('data.tus_endpoint'))->toEndWith('/tus/');
+    expect($response->json('data.tus_endpoint'))->not->toStartWith('https://');
     expect($response->json('data.video'))->not->toHaveKey('source_url');
 
     $this->assertDatabaseHas('videos', [
@@ -68,6 +69,24 @@ it('creates a video and an upload token without accepting a file body', function
         'status' => 'awaiting_upload',
         'uploaded_by' => $admin->id,
     ]);
+});
+
+it('returns an https tus endpoint when the proxy terminated tls', function (): void {
+    $admin = User::factory()->admin()->create();
+
+    $endpoint = $this->actingAs($admin, 'api')
+        ->postJson('/api/v1/admin/videos', [
+            'title' => 'Launch film',
+            'filename' => 'launch.mp4',
+            'size' => 2048,
+            'mime' => 'video/mp4',
+        ], [
+            'X-Forwarded-Proto' => 'https',
+        ])
+        ->assertCreated()
+        ->json('data.tus_endpoint');
+
+    expect($endpoint)->toStartWith('https://')->toEndWith('/tus/');
 });
 
 it('rejects a multipart file on video create', function (): void {

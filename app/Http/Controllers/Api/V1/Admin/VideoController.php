@@ -49,10 +49,16 @@ class VideoController extends Controller
             'uploaded_by' => $request->user()->id,
         ]);
 
-        $endpoint = config('media-hls.endpoint');
-        $endpoint = is_string($endpoint) && $endpoint !== ''
-            ? rtrim($endpoint, '/').'/'
+        $configured = config('media-hls.endpoint');
+        $endpoint = is_string($configured) && $configured !== ''
+            ? $configured
             : rtrim((string) config('app.url'), '/').'/tus/';
+
+        if ($request->headers->get('X-Forwarded-Proto') === 'https') {
+            $endpoint = (string) preg_replace('#^http://#i', 'https://', $endpoint);
+        }
+
+        $endpoint = rtrim($endpoint, '/').'/';
 
         return $this->apiCreated('Video created.', [
             'video_id' => $video->id,

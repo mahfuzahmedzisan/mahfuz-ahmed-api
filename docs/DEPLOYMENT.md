@@ -57,7 +57,9 @@ with `storage:link`.
 ## 4. Database
 
 Passport `oauth_*` tables live in the database and survive a rebuild on their
-own. Run migrations with `php artisan migrate --force`.
+own. `docker/entrypoint.sh` runs `php artisan migrate --force` on every boot,
+so a new table is created before Nginx serves traffic. A missing `videos` or
+`media` table shows up on the Vercel admin as “Server Error”.
 
 Never run `migrate:fresh` against production. It truncates `oauth_access_tokens`
 and `oauth_refresh_tokens` along with everything else.

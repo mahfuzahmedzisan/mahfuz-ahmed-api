@@ -57,6 +57,9 @@ write_frontend_cors_map
 # the running container, so caching during the build would freeze placeholders
 # into bootstrap/cache where they outrank the real values at runtime.
 su -s /bin/sh www-data -c 'php artisan config:cache --no-interaction'
+# Pending migrations only. Without this, a new table (videos, media) 500s
+# in production while the route itself is already registered.
+su -s /bin/sh www-data -c 'php artisan migrate --force --no-interaction'
 su -s /bin/sh www-data -c 'php artisan route:cache --no-interaction'
 su -s /bin/sh www-data -c 'php artisan view:cache --no-interaction'
 
