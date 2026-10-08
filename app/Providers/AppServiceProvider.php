@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Contracts\EncodesHls;
+use App\Services\FfmpegHlsEncoder;
 use App\Support\FrontendOrigins;
 use Carbon\CarbonInterval;
 use Illuminate\Auth\Notifications\ResetPassword;
@@ -18,7 +20,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->bind(EncodesHls::class, FfmpegHlsEncoder::class);
     }
 
     /**

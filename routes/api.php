@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\Admin\UserController;
+use App\Http\Controllers\Api\V1\Admin\VideoController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\BroadcastAuthController;
 use App\Http\Controllers\Api\V1\PasswordResetController;
@@ -51,12 +52,9 @@ Route::middleware('auth:api')->prefix('profile')->group(function (): void {
 });
 
 /*
- * No admin-only resources remain after stripping the portfolio/media/
- * taxonomy surface back out in Phase 2. This route exists purely to prove
- * the `role` middleware works end-to-end (see Phase 9's authorization
- * test) and as the pattern to copy for whatever admin-only endpoints get
- * added back later: stack `role:admin` on top of `auth:api`, never rely on
- * `auth:api` alone to gate privileged actions.
+ * Admin routes stack `role:admin` on top of `auth:api`. The ping route
+ * stays so the authorization test can prove the middleware without a
+ * resource. Video bytes never arrive here; the browser uploads them to tusd.
  */
 Route::middleware(['auth:api', 'role:admin', 'throttle:admin-users'])->group(function (): void {
     Route::get('admin/ping', function (Request $request) {
@@ -66,4 +64,10 @@ Route::middleware(['auth:api', 'role:admin', 'throttle:admin-users'])->group(fun
     });
 
     Route::get('admin/users', [UserController::class, 'index']);
+
+    Route::get('admin/videos', [VideoController::class, 'index']);
+    Route::post('admin/videos', [VideoController::class, 'store']);
+    Route::get('admin/videos/{video}', [VideoController::class, 'show']);
+    Route::patch('admin/videos/{video}', [VideoController::class, 'update']);
+    Route::delete('admin/videos/{video}', [VideoController::class, 'destroy']);
 });

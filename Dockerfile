@@ -1,8 +1,8 @@
 # Coolify / production app image for the mahfuz-ahmed-api (Laravel API).
 #
-# Topology: this image runs Nginx + PHP-FPM + queue workers + the scheduler.
-# Postgres/MySQL, Redis, and search engines (Typesense, Meilisearch, Algolia,
-# Turbopuffer) stay external Coolify resources — never start them in this container.
+# Topology: this image runs Nginx + PHP-FPM + the default queue + a media
+# queue worker + tusd. Postgres/MySQL, Redis, and search engines stay
+# external Coolify resources — never start them in this container.
 #
 # Horizon / Pulse: Supervisor stubs exist in docker/supervisord.conf but must
 # stay commented until those Composer packages are installed. Enabling Horizon
@@ -63,6 +63,7 @@ RUN apt-get update \
         nginx \
         supervisor \
         webp \
+        ffmpeg \
     && rm -rf /var/lib/apt/lists/* \
     && rm -f /etc/nginx/sites-enabled/default
 
@@ -73,12 +74,22 @@ COPY --from=build --chown=www-data:www-data /var/www /var/www
 COPY docker/php.ini /usr/local/etc/php/conf.d/99-production.ini
 COPY docker/php-fpm.conf /usr/local/etc/php-fpm.d/zz-production.conf
 COPY docker/nginx.conf /etc/nginx/nginx.conf
+COPY docker/tus-origins.conf /etc/nginx/tus-origins.conf
 COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY docker/entrypoint.sh /usr/local/bin/application-entrypoint
 
 RUN chmod 0755 /usr/local/bin/application-entrypoint \
     && mkdir -p /run/nginx /var/log/supervisor \
     && chown -R www-data:www-data /var/www/storage /var/www/bootstrap/cache
+
+ARG TUSD_VERSION=2.10.1
+ARG TARGETARCH
+RUN arch="${TARGETARCH:-amd64}" \
+    && curl -fsSL -o /tmp/tusd.tar.gz "https://github.com/tus/tusd/releases/download/v${TUSD_VERSION}/tusd_linux_${arch}.tar.gz" \
+    && tar -xzf /tmp/tusd.tar.gz -C /tmp \
+    && find /tmp -type f -name tusd -exec mv {} /usr/local/bin/tusd \; \
+    && chmod 0755 /usr/local/bin/tusd \
+    && rm -rf /tmp/tusd.tar.gz /tmp/tusd_linux_*
 
 WORKDIR /var/www
 
@@ -90,7 +101,10 @@ ENV QUEUE_CONNECTION=redis \
     QUEUE_TIMEOUT=300 \
     QUEUE_MAX_TIME=3600 \
     QUEUE_MEMORY=128 \
-    QUEUE_PROCESSES=2
+    QUEUE_PROCESSES=2 \
+    FFMPEG_BINARIES=/usr/bin/ffmpeg \
+    FFPROBE_BINARIES=/usr/bin/ffprobe \
+    MEDIA_DISK=public
 
 EXPOSE 80
 

@@ -13,6 +13,7 @@ fi
 mkdir -p \
     bootstrap/cache \
     storage/app/public \
+    storage/app/tus \
     storage/framework/cache/data \
     storage/framework/sessions \
     storage/framework/testing \
@@ -21,6 +22,36 @@ mkdir -p \
 
 chown -R www-data:www-data storage bootstrap/cache
 chmod -R u=rwX,g=rwX,o=rX storage bootstrap/cache
+
+# Nginx reads this map before it starts. FRONTEND_URLS is comma-separated.
+write_frontend_cors_map() {
+    dest=/etc/nginx/tus-origins.conf
+    tmp="${dest}.tmp"
+    printf '%s\n' 'map $http_origin $frontend_cors_origin {' > "$tmp"
+    printf '%s\n' '    default "";' >> "$tmp"
+    seen="|"
+    list=$(printf '%s,%s' "${FRONTEND_URLS:-}" "${FRONTEND_URL:-}")
+    old_ifs=$IFS
+    IFS=','
+    for origin in $list; do
+        origin=$(printf '%s' "$origin" | tr -d '[:space:]')
+        origin=${origin%/}
+        case $origin in
+            http://*|https://*) ;;
+            *) continue ;;
+        esac
+        case $seen in
+            *"|${origin}|"*) continue ;;
+        esac
+        seen="${seen}${origin}|"
+        printf '    "%s" $http_origin;\n' "$origin" >> "$tmp"
+    done
+    IFS=$old_ifs
+    printf '%s\n' '}' >> "$tmp"
+    mv "$tmp" "$dest"
+}
+
+write_frontend_cors_map
 
 # Cache here, not in the Dockerfile. Coolify injects environment variables into
 # the running container, so caching during the build would freeze placeholders

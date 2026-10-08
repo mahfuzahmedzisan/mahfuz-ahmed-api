@@ -18,9 +18,11 @@
         "laravel/scout": "^11.8",
         "laravel/tinker": "^3.0",
         "meilisearch/meilisearch-php": "^1.17",
+        "pbmedia/laravel-ffmpeg": "^8.9",
         "pusher/pusher-php-server": "^7.3",
         "spatie/image": "^3.9",
         "spatie/laravel-image-optimizer": "^1.8",
+        "spatie/laravel-medialibrary": "^11.23",
         "spatie/laravel-query-builder": "^7.3",
         "typesense/typesense-php": "^6.0"
     },
