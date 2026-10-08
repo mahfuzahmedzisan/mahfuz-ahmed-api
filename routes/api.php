@@ -73,4 +73,5 @@ Route::middleware(['auth:api', 'role:admin', 'throttle:admin-users'])->group(fun
     Route::delete('admin/media/{mediaItem}', [MediaController::class, 'destroy']);
     Route::post('admin/media/{mediaItem}/thumbnail', [MediaController::class, 'thumbnail']);
     Route::post('admin/media/{mediaItem}/retry', [MediaController::class, 'retry']);
+    Route::post('admin/media/{mediaItem}/resume', [MediaController::class, 'resumeUpload']);
 });

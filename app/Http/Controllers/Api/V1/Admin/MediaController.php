@@ -154,6 +154,28 @@ class MediaController extends Controller
         return $this->apiSuccess('Media deleted successfully.');
     }
 
+    public function resumeUpload(MediaItem $mediaItem, MediaUploadTokenService $tokens): JsonResponse
+    {
+        if ($mediaItem->status !== VideoStatus::AwaitingUpload) {
+            return $this->apiUnprocessable('This file is already uploaded.');
+        }
+
+        $configured = config('media-hls.endpoint');
+        $endpoint = is_string($configured) && $configured !== ''
+            ? $configured
+            : rtrim((string) config('app.url'), '/').'/tus/';
+
+        if (request()->headers->get('X-Forwarded-Proto') === 'https') {
+            $endpoint = (string) preg_replace('#^http://#i', 'https://', $endpoint);
+        }
+
+        return $this->apiSuccess('Upload can continue.', [
+            'media_id' => $mediaItem->id,
+            'tus_endpoint' => rtrim($endpoint, '/').'/',
+            'upload_token' => $tokens->issue($mediaItem),
+        ]);
+    }
+
     public function retry(MediaItem $mediaItem): JsonResponse
     {
         if (! $mediaItem->kind->streamsAsHls()) {
