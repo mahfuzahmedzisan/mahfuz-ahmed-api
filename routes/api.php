@@ -66,6 +66,7 @@ Route::middleware(['auth:api', 'role:admin', 'throttle:admin-users'])->group(fun
     Route::get('admin/users', [UserController::class, 'index']);
 
     Route::get('admin/media', [MediaController::class, 'index']);
+    Route::get('admin/media/slug-preview', [MediaController::class, 'slugPreview']);
     Route::post('admin/media', [MediaController::class, 'store']);
     Route::get('admin/media/{mediaItem}', [MediaController::class, 'show']);
     Route::patch('admin/media/{mediaItem}', [MediaController::class, 'update']);

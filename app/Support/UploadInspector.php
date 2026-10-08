@@ -31,7 +31,7 @@ final class UploadInspector
 
         $header = (string) file_get_contents($path, false, null, 0, 512);
 
-        if ($this->looksDangerous($header)) {
+        if ($this->looksDangerous($header, $extension)) {
             return 'This file was rejected because it looks like executable or script content.';
         }
 
@@ -70,11 +70,22 @@ final class UploadInspector
             'doc', 'xls', 'ppt' => str_starts_with($bytes, "\xD0\xCF\x11\xE0"),
             'docx', 'xlsx', 'pptx' => str_starts_with($bytes, "PK\x03\x04"),
             'txt', 'csv' => ! str_contains(substr($bytes, 0, 32), "\0"),
+            'svg' => $this->looksLikeSvg($bytes),
             default => false,
         };
     }
 
-    private function looksDangerous(string $header): bool
+    private function looksLikeSvg(string $bytes): bool
+    {
+        $start = ltrim($bytes, "\xEF\xBB\xBF\t\r\n ");
+        $head = strtolower(substr($start, 0, 120));
+
+        return str_starts_with($head, '<svg')
+            || str_starts_with($head, '<?xml')
+            || str_starts_with($head, '<!doctype svg');
+    }
+
+    private function looksDangerous(string $header, string $extension): bool
     {
         $start = ltrim($header);
 
@@ -84,8 +95,10 @@ final class UploadInspector
 
         $sample = strtolower(substr($header, 0, 256));
 
-        return str_contains($sample, '<?php')
-            || str_contains($sample, '<?=')
-            || str_contains($sample, '<script');
+        if (str_contains($sample, '<?php') || str_contains($sample, '<?=')) {
+            return true;
+        }
+
+        return $extension !== 'svg' && str_contains($sample, '<script');
     }
 }

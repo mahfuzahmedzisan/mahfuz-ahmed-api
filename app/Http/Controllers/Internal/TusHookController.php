@@ -9,6 +9,7 @@ use App\Jobs\GenerateHlsJob;
 use App\Models\MediaItem;
 use App\Services\ImageSanitizer;
 use App\Services\MediaUploadTokenService;
+use App\Services\SvgSanitizer;
 use App\Support\AllowedMedia;
 use App\Support\UploadInspector;
 use Illuminate\Http\JsonResponse;
@@ -113,7 +114,9 @@ class TusHookController extends Controller
 
         if ($item->kind === MediaKind::Image) {
             try {
-                $storePath = app(ImageSanitizer::class)->reencode($path, (string) $item->extension);
+                $storePath = $item->extension === 'svg'
+                    ? app(SvgSanitizer::class)->sanitize($path)
+                    : app(ImageSanitizer::class)->reencode($path, (string) $item->extension);
             } catch (\RuntimeException $exception) {
                 @unlink($path);
                 @unlink($path.'.info');

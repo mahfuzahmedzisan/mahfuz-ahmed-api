@@ -111,19 +111,54 @@ class MediaItem extends Model implements HasMedia
 
     public static function uniqueSlug(string $title, ?int $ignoreId = null): string
     {
-        $base = Str::slug($title) ?: 'media';
-        $slug = $base;
-        $suffix = 2;
+        return static::nextSlugs($title, 1, $ignoreId)[0];
+    }
 
-        while (static::query()
-            ->where('slug', $slug)
+    /**
+     * Next free slugs for one shared name.
+     * "New image" becomes new-image, then new-image-1, new-image-2.
+     * A slug already stored is skipped and the count continues.
+     *
+     * @return list<string>
+     */
+    public static function nextSlugs(string $title, int $count, ?int $ignoreId = null): array
+    {
+        $count = max(1, $count);
+        $base = Str::slug($title) ?: 'media';
+        $existing = static::query()
             ->when($ignoreId, fn ($query) => $query->whereKeyNot($ignoreId))
-            ->exists()) {
-            $slug = $base.'-'.$suffix;
-            $suffix++;
+            ->where(function ($query) use ($base): void {
+                $query->where('slug', $base)->orWhere('slug', 'like', $base.'-%');
+            })
+            ->pluck('slug');
+
+        $taken = [];
+
+        foreach ($existing as $slug) {
+            if ($slug === $base) {
+                $taken[0] = true;
+
+                continue;
+            }
+
+            if (preg_match('/^'.preg_quote($base, '/').'-(\d+)$/', (string) $slug, $matches) === 1) {
+                $taken[(int) $matches[1]] = true;
+            }
         }
 
-        return $slug;
+        $slugs = [];
+        $index = 0;
+
+        while (count($slugs) < $count) {
+            if (! isset($taken[$index])) {
+                $slugs[] = $index === 0 ? $base : $base.'-'.$index;
+                $taken[$index] = true;
+            }
+
+            $index++;
+        }
+
+        return $slugs;
     }
 
     /**

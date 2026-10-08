@@ -15,6 +15,7 @@ final class AllowedMedia
         'png' => ['kind' => MediaKind::Image, 'mimes' => ['image/png']],
         'webp' => ['kind' => MediaKind::Image, 'mimes' => ['image/webp']],
         'gif' => ['kind' => MediaKind::Image, 'mimes' => ['image/gif']],
+        'svg' => ['kind' => MediaKind::Image, 'mimes' => ['image/svg+xml', 'image/svg', 'text/xml', 'application/xml', 'text/plain', 'text/html']],
         'mp4' => ['kind' => MediaKind::Video, 'mimes' => ['video/mp4']],
         'mov' => ['kind' => MediaKind::Video, 'mimes' => ['video/quicktime']],
         'webm' => ['kind' => MediaKind::Video, 'mimes' => ['video/webm']],

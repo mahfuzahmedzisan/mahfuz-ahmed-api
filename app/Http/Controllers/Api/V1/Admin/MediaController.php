@@ -57,6 +57,16 @@ class MediaController extends Controller
         ]);
     }
 
+    public function slugPreview(Request $request): JsonResponse
+    {
+        $title = trim($request->string('title')->toString());
+        $count = min(10, max(1, $request->integer('count', 1)));
+
+        return $this->apiSuccess('Slugs prepared.', [
+            'slugs' => $title === '' ? [] : MediaItem::nextSlugs($title, $count),
+        ]);
+    }
+
     public function store(StoreMediaRequest $request, MediaUploadTokenService $tokens): JsonResponse
     {
         $title = $request->string('title')->toString();

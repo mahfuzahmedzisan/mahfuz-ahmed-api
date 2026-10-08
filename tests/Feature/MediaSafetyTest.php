@@ -85,6 +85,30 @@ it('rejects a jpeg whose bytes are php', function (): void {
     expect(MediaItem::query()->findOrFail($result['id'])->getFirstMedia('source'))->toBeNull();
 });
 
+it('numbers a shared name and skips slugs that already exist', function (): void {
+    $admin = User::factory()->admin()->create();
+    MediaItem::factory()->create(['title' => 'New image', 'slug' => 'new-image']);
+
+    $this->actingAs($admin, 'api')
+        ->getJson('/api/v1/admin/media/slug-preview?title=New%20image&count=2')
+        ->assertOk()
+        ->assertJsonPath('data.slugs.0', 'new-image-1')
+        ->assertJsonPath('data.slugs.1', 'new-image-2');
+});
+
+it('accepts an svg and stores it without script', function (): void {
+    $svg = '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script><circle r="4"/></svg>';
+    $result = finishUpload('mark.svg', 'image/svg+xml', $svg, 'Mark');
+
+    expect($result['response']->status())->toBe(200);
+    $item = MediaItem::query()->findOrFail($result['id']);
+    expect($item->status)->toBe(VideoStatus::Ready);
+    $path = $item->getFirstMediaPath('source');
+    expect($path)->not->toBeNull();
+    $stored = strtolower((string) file_get_contents((string) $path));
+    expect($stored)->not->toContain('<script')->toContain('circle');
+});
+
 it('rejects a file whose magic bytes do not match the extension', function (): void {
     $png = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==');
     $result = finishUpload('photo.jpg', 'image/jpeg', $png);

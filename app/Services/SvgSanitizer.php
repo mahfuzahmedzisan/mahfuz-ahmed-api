@@ -2,76 +2,114 @@
 
 namespace App\Services;
 
-use enshrined\svgSanitize\Sanitizer;
-use Illuminate\Http\UploadedFile;
+use DOMDocument;
+use DOMElement;
 use RuntimeException;
 
-class SvgSanitizer
+/**
+ * Keeps the drawing and drops anything that can run in the browser.
+ */
+final class SvgSanitizer
 {
-    /**
-     * @var list<string>
-     */
-    private const SVG_MIMES = [
-        'image/svg+xml',
-        'image/svg',
-        'text/svg',
+    /** @var list<string> */
+    private const REMOVED_TAGS = [
+        'script',
+        'foreignobject',
+        'iframe',
+        'embed',
+        'object',
+        'link',
+        'meta',
+        'handler',
+        'set',
     ];
 
-    public function sanitize(string $rawSvg): string
+    public function sanitize(string $sourcePath): string
     {
-        $sanitizer = new Sanitizer;
-        $sanitizer->removeRemoteReferences(true);
-        $clean = $sanitizer->sanitize($rawSvg);
+        $xml = file_get_contents($sourcePath);
 
-        if ($clean === false || trim($clean) === '') {
-            throw new RuntimeException('The SVG file could not be sanitized and was rejected.');
+        if (! is_string($xml) || trim($xml) === '') {
+            throw new RuntimeException('This image could not be sanitized.');
         }
 
-        return $clean;
+        $xml = (string) preg_replace('/^\xEF\xBB\xBF/', '', $xml);
+        $previous = libxml_use_internal_errors(true);
+        $dom = new DOMDocument;
+        $loaded = $dom->loadXML($xml, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING);
+        libxml_clear_errors();
+        libxml_use_internal_errors($previous);
+
+        $root = $dom->documentElement;
+
+        if (! $loaded || ! $root instanceof DOMElement || strtolower($root->localName) !== 'svg') {
+            throw new RuntimeException('This image could not be sanitized.');
+        }
+
+        $this->strip($dom);
+
+        $clean = $dom->saveXML($root);
+
+        if (! is_string($clean) || $clean === '') {
+            throw new RuntimeException('This image could not be sanitized.');
+        }
+
+        $target = tempnam(sys_get_temp_dir(), 'media-svg');
+
+        if ($target === false) {
+            throw new RuntimeException('Unable to prepare a sanitized image.');
+        }
+
+        $destination = $target.'.svg';
+        @unlink($target);
+
+        if (file_put_contents($destination, $clean) === false) {
+            @unlink($destination);
+
+            throw new RuntimeException('This image could not be sanitized.');
+        }
+
+        return $destination;
     }
 
-    public function isSvg(UploadedFile|string $source): bool
+    private function strip(DOMDocument $dom): void
     {
-        if ($source instanceof UploadedFile) {
-            $extension = strtolower($source->getClientOriginalExtension());
-            $mime = strtolower((string) ($source->getMimeType() ?: $source->getClientMimeType()));
+        $remove = [];
 
-            if ($extension === 'svg' || in_array($mime, self::SVG_MIMES, true) || str_contains($mime, 'svg')) {
-                return true;
+        foreach ($dom->getElementsByTagName('*') as $element) {
+            if (! $element instanceof DOMElement) {
+                continue;
             }
 
-            $path = $source->getRealPath() ?: $source->getPathname();
+            if (in_array(strtolower($element->localName), self::REMOVED_TAGS, true)) {
+                $remove[] = $element;
 
-            return $this->looksLikeSvg($path);
+                continue;
+            }
+
+            $drop = [];
+
+            foreach ($element->attributes as $attribute) {
+                $name = strtolower($attribute->nodeName);
+                $value = trim($attribute->nodeValue ?? '');
+
+                if (str_starts_with($name, 'on') || ($name === 'style' && preg_match('/javascript:|expression\s*\(/i', $value) === 1)) {
+                    $drop[] = $attribute->nodeName;
+
+                    continue;
+                }
+
+                if (str_ends_with($name, 'href') && $value !== '' && ! str_starts_with($value, '#')) {
+                    $drop[] = $attribute->nodeName;
+                }
+            }
+
+            foreach ($drop as $name) {
+                $element->removeAttribute($name);
+            }
         }
 
-        $detected = @mime_content_type($source);
-        $mime = is_string($detected) ? strtolower($detected) : '';
-
-        if (str_contains($mime, 'svg') || str_ends_with(strtolower($source), '.svg')) {
-            return true;
+        foreach ($remove as $element) {
+            $element->parentNode?->removeChild($element);
         }
-
-        return $this->looksLikeSvg($source);
-    }
-
-    private function looksLikeSvg(string $path): bool
-    {
-        $handle = @fopen($path, 'rb');
-        if ($handle === false) {
-            return false;
-        }
-
-        $header = fread($handle, 256);
-        fclose($handle);
-
-        if (! is_string($header)) {
-            return false;
-        }
-
-        $trimmed = ltrim($header);
-
-        return str_starts_with($trimmed, '<svg')
-            || (str_starts_with($trimmed, '<?xml') && str_contains($header, '<svg'));
     }
 }
