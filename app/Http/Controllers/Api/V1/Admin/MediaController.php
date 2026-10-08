@@ -160,8 +160,14 @@ class MediaController extends Controller
             return $this->apiUnprocessable('Only audio and video can be converted again.');
         }
 
-        if ($mediaItem->status !== VideoStatus::Failed) {
-            return $this->apiUnprocessable('This file is not waiting for another conversion.');
+        $retryable = [VideoStatus::Failed, VideoStatus::Uploaded, VideoStatus::Processing];
+
+        if (! in_array($mediaItem->status, $retryable, true)) {
+            $message = $mediaItem->status === VideoStatus::AwaitingUpload
+                ? 'The upload has not finished, so there is nothing to convert.'
+                : 'This file is not waiting for another conversion.';
+
+            return $this->apiUnprocessable($message);
         }
 
         if ($mediaItem->getFirstMedia('source') === null) {
