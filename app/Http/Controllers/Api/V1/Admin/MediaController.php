@@ -13,6 +13,7 @@ use App\Jobs\GenerateHlsJob;
 use App\Models\MediaItem;
 use App\Services\ImageConversionService;
 use App\Services\MediaUploadTokenService;
+use App\Services\StoreFinishedUpload;
 use App\Support\AllowedMedia;
 use App\Support\Query\BuildsApiListQuery;
 use App\Support\UploadInspector;
@@ -120,8 +121,11 @@ class MediaController extends Controller
         ]);
     }
 
-    public function show(MediaItem $mediaItem): JsonResponse
+    public function show(MediaItem $mediaItem, StoreFinishedUpload $uploads): JsonResponse
     {
+        $uploads->adoptIfComplete($mediaItem);
+        $mediaItem->refresh();
+
         return $this->apiSuccess('Media retrieved successfully.', [
             'media' => (new MediaResource($mediaItem))->resolve(),
         ]);

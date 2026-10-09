@@ -185,7 +185,7 @@ it('stores the source and dispatches the media job when tus finishes', function 
         ->assertOk();
 
     $this->withHeaders(['X-Tus-Hook-Secret' => 'test-tus-secret'])
-        ->postJson('/internal/tus/post-finish', mediaPayload($created['token'], $created['id'], [
+        ->postJson('/internal/tus/pre-finish', mediaPayload($created['token'], $created['id'], [
             'Size' => strlen($bytes),
             'Offset' => strlen($bytes),
             'Storage' => ['Path' => $path],
