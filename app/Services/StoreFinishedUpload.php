@@ -8,6 +8,7 @@ use App\Jobs\GenerateHlsJob;
 use App\Models\MediaItem;
 use App\Support\AllowedMedia;
 use App\Support\UploadInspector;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 
 final class StoreFinishedUpload
@@ -28,30 +29,118 @@ final class StoreFinishedUpload
             return;
         }
 
-        $tusId = (string) $item->tus_id;
+        $lock = Cache::lock('media-finish-'.$item->id, 180);
 
-        if (preg_match('/^[A-Za-z0-9]+$/', $tusId) !== 1) {
+        if (! $lock->get()) {
             return;
         }
 
+        try {
+            $item->refresh();
+
+            if ($item->status !== VideoStatus::AwaitingUpload) {
+                return;
+            }
+
+            $located = $this->locateFinishedUpload($item);
+
+            if ($located === null) {
+                return;
+            }
+
+            $this->store($item, $located['path'], $located['filename'], $located['tus_id']);
+        } catch (\Throwable $exception) {
+            report($exception);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /**
+     * @return array{path: string, tus_id: string, filename: string}|null
+     */
+    private function locateFinishedUpload(MediaItem $item): ?array
+    {
         $directory = rtrim((string) config('media-hls.upload_dir'), DIRECTORY_SEPARATOR);
+        $expected = (int) $item->size;
+
+        if ($expected < 1 || ! is_dir($directory)) {
+            return null;
+        }
+
+        $tusId = (string) $item->tus_id;
+
+        if (preg_match('/^[A-Za-z0-9]+$/', $tusId) === 1) {
+            $direct = $this->finishedUpload($directory, $tusId, $expected, $item);
+
+            if ($direct !== null) {
+                return $direct;
+            }
+        }
+
+        $infos = glob($directory.DIRECTORY_SEPARATOR.'*.info') ?: [];
+
+        foreach ($infos as $infoPath) {
+            $payload = json_decode((string) file_get_contents($infoPath), true);
+
+            if (! is_array($payload)) {
+                continue;
+            }
+
+            $metadata = $payload['MetaData'] ?? null;
+            $mediaId = is_array($metadata) ? (int) ($metadata['media_id'] ?? 0) : 0;
+
+            if ($mediaId !== $item->id) {
+                continue;
+            }
+
+            $id = (string) ($payload['ID'] ?? '');
+            $found = $this->finishedUpload($directory, $id, $expected, $item, $payload);
+
+            if ($found !== null) {
+                return $found;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $payload
+     * @return array{path: string, tus_id: string, filename: string}|null
+     */
+    private function finishedUpload(string $directory, string $tusId, int $expected, MediaItem $item, ?array $payload = null): ?array
+    {
+        if (preg_match('/^[A-Za-z0-9]+$/', $tusId) !== 1) {
+            return null;
+        }
+
         $path = $directory.DIRECTORY_SEPARATOR.$tusId;
 
         if (! is_file($path)) {
-            return;
+            return null;
         }
 
         $size = filesize($path);
 
-        if ($size === false || $size !== (int) $item->size) {
-            return;
+        if ($size === false || $size !== $expected) {
+            return null;
         }
 
-        $filename = $item->extension !== ''
-            ? $item->slug.'.'.$item->extension
-            : $item->slug;
+        $metadata = is_array($payload) ? ($payload['MetaData'] ?? null) : null;
+        $filename = is_array($metadata) ? (string) ($metadata['filename'] ?? '') : '';
 
-        $this->store($item, $path, $filename, $tusId);
+        if ($filename === '') {
+            $filename = $item->extension !== ''
+                ? $item->slug.'.'.$item->extension
+                : $item->slug;
+        }
+
+        return [
+            'path' => $path,
+            'tus_id' => $tusId,
+            'filename' => $filename,
+        ];
     }
 
     public function store(MediaItem $item, string $path, string $filename, ?string $tusId): ?string

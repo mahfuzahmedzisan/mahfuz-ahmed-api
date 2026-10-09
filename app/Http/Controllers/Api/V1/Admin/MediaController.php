@@ -47,6 +47,14 @@ class MediaController extends Controller
         ]);
 
         $page = $list->paginate(BuildsApiListQuery::perPage($request))->withQueryString();
+        $uploads = app(StoreFinishedUpload::class);
+
+        foreach ($page->items() as $item) {
+            if ($item instanceof MediaItem && $item->status === VideoStatus::AwaitingUpload) {
+                $uploads->adoptIfComplete($item);
+                $item->refresh();
+            }
+        }
 
         return $this->apiSuccess('Media retrieved successfully.', [
             'media' => MediaResource::collection($page->items())->resolve(),

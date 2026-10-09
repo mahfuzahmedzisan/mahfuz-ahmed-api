@@ -2,6 +2,7 @@
 
 use App\Enums\VideoStatus;
 use App\Models\MediaItem;
+use App\Services\StoreFinishedUpload;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -9,6 +10,19 @@ use Illuminate\Support\Facades\Schedule;
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
+
+Schedule::call(function (): void {
+    $uploads = app(StoreFinishedUpload::class);
+
+    MediaItem::query()
+        ->where('status', VideoStatus::AwaitingUpload)
+        ->where('created_at', '>', now()->subDay())
+        ->orderBy('id')
+        ->limit(20)
+        ->each(function (MediaItem $item) use ($uploads): void {
+            $uploads->adoptIfComplete($item);
+        });
+})->everyMinute()->name('adopt-finished-tus-uploads')->withoutOverlapping();
 
 Schedule::call(function (): void {
     $hours = max(1, (int) config('media-hls.abandon_after_hours'));

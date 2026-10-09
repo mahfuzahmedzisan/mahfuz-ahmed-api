@@ -8,6 +8,7 @@ use App\Models\MediaItem;
 use App\Models\User;
 use App\Services\HlsEncodeResult;
 use App\Services\HlsTranscodeService;
+use App\Services\StoreFinishedUpload;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Bus;
@@ -200,6 +201,47 @@ it('stores the source and dispatches the media job when tus finishes', function 
     Bus::assertDispatched(GenerateHlsJob::class, function (GenerateHlsJob $job) use ($created): bool {
         return $job->mediaId === $created['id'] && $job->queue === 'media';
     });
+});
+
+it('imports a finished tus file even when the library row has no tus id', function (): void {
+    Storage::fake('public');
+    Bus::fake();
+
+    $created = createMedia();
+    $bytes = mp4Bytes();
+    $tusId = '37d1569e85db142ebe0566417ed4848a';
+    $directory = storage_path('app/tus');
+
+    if (! is_dir($directory)) {
+        mkdir($directory, 0775, true);
+    }
+
+    $path = $directory.DIRECTORY_SEPARATOR.$tusId;
+    file_put_contents($path, $bytes);
+    file_put_contents($path.'.info', json_encode([
+        'ID' => $tusId,
+        'Size' => strlen($bytes),
+        'Offset' => 0,
+        'MetaData' => [
+            'filename' => 'clip.mp4',
+            'filetype' => 'video/mp4',
+            'media_id' => (string) $created['id'],
+        ],
+    ]));
+
+    $item = MediaItem::query()->findOrFail($created['id']);
+
+    expect($item->tus_id)->toBeNull();
+
+    app(StoreFinishedUpload::class)->adoptIfComplete($item);
+
+    $item->refresh();
+
+    expect($item->status)->toBe(VideoStatus::Uploaded)
+        ->and($item->tus_id)->toBe($tusId)
+        ->and($item->getFirstMedia('source'))->not->toBeNull();
+
+    Bus::assertDispatched(GenerateHlsJob::class);
 });
 
 it('marks a video ready from a mocked encoder and deletes the raw source', function (): void {
