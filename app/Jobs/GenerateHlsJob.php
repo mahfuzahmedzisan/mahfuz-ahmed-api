@@ -18,7 +18,7 @@ class GenerateHlsJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $timeout = 1800;
+    public int $timeout = 7200;
 
     public int $tries = 1;
 

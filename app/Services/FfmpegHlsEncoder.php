@@ -55,7 +55,7 @@ final class FfmpegHlsEncoder implements EncodesHls
             });
         }
 
-        foreach ($this->rungs($width, $height) as $rung) {
+        foreach (self::rungsFor($width, $height) as $rung) {
             $format = (new X264)
                 ->setKiloBitrate($rung['video'])
                 ->setAudioKiloBitrate($rung['audio']);
@@ -98,7 +98,7 @@ final class FfmpegHlsEncoder implements EncodesHls
             }
 
             $playlist = $folder.DIRECTORY_SEPARATOR.'index.m3u8';
-            $result = Process::timeout(1800)->run([
+            $result = Process::timeout(7200)->run([
                 $ffmpeg,
                 '-y',
                 '-i',
@@ -145,33 +145,94 @@ final class FfmpegHlsEncoder implements EncodesHls
     }
 
     /**
-     * A rung is skipped when both of its sides are larger than the source.
-     * At least one rung always remains.
+     * The top rung is the source itself. Lower rungs follow its shorter side,
+     * never larger than the source, and keep the source orientation.
+     *
+     * 720 → 360 + original. 1080 → 720 + original. 2K → 720 + 1080 + original.
+     * 4K → 1080 + 2K + original. Below 720, only the original.
      *
      * @return list<array{width: int, height: int, video: int, audio: int}>
      */
-    private function rungs(?int $sourceWidth, ?int $sourceHeight): array
+    public static function rungsFor(?int $sourceWidth, ?int $sourceHeight): array
     {
-        $ladder = [
-            ['width' => 640, 'height' => 360, 'video' => 800, 'audio' => 96],
-            ['width' => 1280, 'height' => 720, 'video' => 2500, 'audio' => 128],
-            ['width' => 1920, 'height' => 1080, 'video' => 5000, 'audio' => 192],
-        ];
-
-        if ($sourceWidth === null || $sourceHeight === null) {
-            return $ladder;
+        if ($sourceWidth === null || $sourceHeight === null || $sourceWidth < 2 || $sourceHeight < 2) {
+            return [
+                self::standardRung(720, false),
+                self::standardRung(1080, false),
+            ];
         }
 
-        $fitting = array_values(array_filter(
-            $ladder,
-            function (array $rung) use ($sourceWidth, $sourceHeight): bool {
-                $asLandscape = $sourceWidth >= $rung['width'] && $sourceHeight >= $rung['height'];
-                $asPortrait = $sourceHeight >= $rung['width'] && $sourceWidth >= $rung['height'];
+        $portrait = $sourceHeight > $sourceWidth;
+        $short = min($sourceWidth, $sourceHeight);
+        $below = match (true) {
+            $short >= 2160 => [1080, 1440],
+            $short >= 1440 => [720, 1080],
+            $short >= 1080 => [720],
+            $short >= 720 => [360],
+            default => [],
+        };
 
-                return $asLandscape || $asPortrait;
-            },
-        ));
+        $rungs = [];
 
-        return $fitting === [] ? [$ladder[0]] : $fitting;
+        foreach ($below as $tier) {
+            $rung = self::standardRung($tier, $portrait);
+
+            if ($rung['width'] > $sourceWidth || $rung['height'] > $sourceHeight) {
+                continue;
+            }
+
+            if ($rung['width'] === $sourceWidth && $rung['height'] === $sourceHeight) {
+                continue;
+            }
+
+            $rungs[] = $rung;
+        }
+
+        $rate = self::rateForShortSide($short);
+        $rungs[] = [
+            'width' => $sourceWidth,
+            'height' => $sourceHeight,
+            'video' => $rate['video'],
+            'audio' => $rate['audio'],
+        ];
+
+        return $rungs;
+    }
+
+    /**
+     * @return array{width: int, height: int, video: int, audio: int}
+     */
+    private static function standardRung(int $tier, bool $portrait): array
+    {
+        $long = match ($tier) {
+            360 => 640,
+            720 => 1280,
+            1080 => 1920,
+            1440 => 2560,
+            default => 3840,
+        };
+
+        $rate = self::rateForShortSide($tier);
+
+        return [
+            'width' => $portrait ? $tier : $long,
+            'height' => $portrait ? $long : $tier,
+            'video' => $rate['video'],
+            'audio' => $rate['audio'],
+        ];
+    }
+
+    /**
+     * @return array{video: int, audio: int}
+     */
+    private static function rateForShortSide(int $short): array
+    {
+        return match (true) {
+            $short >= 2160 => ['video' => 16000, 'audio' => 192],
+            $short >= 1440 => ['video' => 8000, 'audio' => 192],
+            $short >= 1080 => ['video' => 5000, 'audio' => 192],
+            $short >= 720 => ['video' => 2500, 'audio' => 128],
+            default => ['video' => 800, 'audio' => 96],
+        };
     }
 }
