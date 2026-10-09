@@ -16,6 +16,7 @@ use App\Services\MediaUploadTokenService;
 use App\Services\StoreFinishedUpload;
 use App\Support\AllowedMedia;
 use App\Support\Query\BuildsApiListQuery;
+use App\Support\ScoutSearch;
 use App\Support\UploadInspector;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -28,11 +29,39 @@ class MediaController extends Controller
         $list = BuildsApiListQuery::make(MediaItem::query()->latest(), [
             AllowedFilter::partial('title'),
             AllowedFilter::exact('status'),
-            AllowedFilter::exact('kind'),
-            AllowedFilter::callback('q', function ($query, $value): void {
-                $term = trim((string) $value);
+            AllowedFilter::callback('kind', function ($query, mixed $value): void {
+                $raw = is_array($value) ? implode(',', $value) : (string) $value;
+                $kinds = collect(explode(',', $raw))
+                    ->map(fn (string $kind): string => trim($kind))
+                    ->filter(fn (string $kind): bool => in_array($kind, ['image', 'video', 'audio', 'pdf', 'document'], true))
+                    ->values();
+
+                if ($kinds->isNotEmpty()) {
+                    $query->whereIn('kind', $kinds->all());
+                }
+            }),
+            AllowedFilter::callback('q', function ($query, mixed $value): void {
+                $term = trim(is_array($value) ? implode(' ', $value) : (string) $value);
 
                 if ($term === '') {
+                    return;
+                }
+
+                $kind = request()->input('filter.kind');
+                $raw = is_array($kind) ? implode(',', $kind) : (string) $kind;
+                $kinds = collect(explode(',', $raw))
+                    ->map(fn (string $item): string => trim($item))
+                    ->filter(fn (string $item): bool => in_array($item, ['image', 'video', 'audio', 'pdf', 'document'], true))
+                    ->values();
+                $options = [];
+
+                if ($kinds->isNotEmpty()) {
+                    $options['filter_by'] = $kinds
+                        ->map(fn (string $item): string => 'kind:='.$item)
+                        ->implode(' || ');
+                }
+
+                if (ScoutSearch::apply($query, MediaItem::class, $term, $options)) {
                     return;
                 }
 

@@ -32,18 +32,24 @@ class ApplicationSettingsController extends Controller
             'registration_enabled' => ['required', 'boolean'],
             'remove_logo' => ['sometimes', 'boolean'],
             'remove_favicon' => ['sometimes', 'boolean'],
+            'logo_url' => ['sometimes', 'nullable', 'string', 'max:2048'],
+            'favicon_url' => ['sometimes', 'nullable', 'string', 'max:2048'],
         ]);
 
         $this->putOrForget($settings, 'general', 'name', $validated['name'] ?? null);
         $this->putOrForget($settings, 'general', 'short_name', $validated['short_name'] ?? null);
         $settings->put('general', 'registration_enabled', (bool) $validated['registration_enabled']);
 
-        if ($request->boolean('remove_logo')) {
-            $settings->removeBrand('logo');
+        if ($request->exists('logo_url')) {
+            $settings->assignBrand('logo', $validated['logo_url'] ?? null);
+        } elseif ($request->boolean('remove_logo')) {
+            $settings->assignBrand('logo', null);
         }
 
-        if ($request->boolean('remove_favicon')) {
-            $settings->removeBrand('favicon');
+        if ($request->exists('favicon_url')) {
+            $settings->assignBrand('favicon', $validated['favicon_url'] ?? null);
+        } elseif ($request->boolean('remove_favicon')) {
+            $settings->assignBrand('favicon', null);
         }
 
         return $this->apiSuccess('General settings saved.', [

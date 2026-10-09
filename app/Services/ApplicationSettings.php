@@ -3,7 +3,9 @@
 namespace App\Services;
 
 use App\Models\ApplicationSetting;
+use App\Support\MediaUrl;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Storage;
@@ -129,17 +131,50 @@ final class ApplicationSettings
         $previous = $this->text('general', $kind.'_path', '');
         $this->put('general', $kind.'_path', $path);
 
-        if ($previous !== '' && $previous !== $path) {
+        if ($previous !== '' && $previous !== $path && self::ownsStoredFile($previous)) {
             Storage::disk('public')->delete($previous);
         }
     }
 
     public function removeBrand(string $kind): void
     {
-        $previous = $this->text('general', $kind.'_path', '');
-        $this->forget('general', $kind.'_path');
+        $this->assignBrand($kind, null);
+    }
 
-        if ($previous !== '') {
+    public function assignBrand(string $kind, mixed $value): void
+    {
+        $field = $kind.'_url';
+
+        if ($value !== null && ! is_string($value)) {
+            throw ValidationException::withMessages([
+                $field => 'Enter a valid image URL.',
+            ]);
+        }
+
+        $incoming = is_string($value) ? $value : null;
+        $stored = MediaUrl::store($incoming);
+
+        if (is_string($incoming) && trim($incoming) !== '' && $stored === null) {
+            throw ValidationException::withMessages([
+                $field => 'Enter a valid http or https URL.',
+            ]);
+        }
+
+        if (is_string($stored) && ! MediaUrl::matchesKinds($stored, ['image'])) {
+            throw ValidationException::withMessages([
+                $field => 'Choose an image URL.',
+            ]);
+        }
+
+        $previous = $this->text('general', $kind.'_path', '');
+
+        if ($stored === null) {
+            $this->forget('general', $kind.'_path');
+        } else {
+            $this->put('general', $kind.'_path', $stored);
+        }
+
+        if ($previous !== '' && $previous !== $stored && self::ownsStoredFile($previous)) {
             Storage::disk('public')->delete($previous);
         }
     }
@@ -215,11 +250,14 @@ final class ApplicationSettings
 
     private function publicUrl(string $path): ?string
     {
-        if ($path === '') {
-            return null;
-        }
+        $formatted = MediaUrl::format($path);
 
-        return Storage::disk('public')->url($path);
+        return is_string($formatted) ? $formatted : null;
+    }
+
+    private static function ownsStoredFile(string $path): bool
+    {
+        return ! str_contains($path, '://') && str_starts_with($path, 'settings/');
     }
 
     /**

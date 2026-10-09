@@ -2,8 +2,12 @@
 
 namespace App\Models;
 
+use App\Contracts\Scout\DefinesSearchIndex;
 use App\Enums\MediaKind;
 use App\Enums\VideoStatus;
+use App\Models\Concerns\ConfiguresScoutSearch;
+use App\Support\Scout\SearchIndexDefinition;
+use App\Support\Scout\SearchIndexField;
 use Database\Factories\MediaItemFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -40,10 +44,10 @@ use Spatie\MediaLibrary\InteractsWithMedia;
     'tus_id',
     'uploaded_by',
 ])]
-class MediaItem extends Model implements HasMedia
+class MediaItem extends Model implements DefinesSearchIndex, HasMedia
 {
     /** @use HasFactory<MediaItemFactory> */
-    use HasFactory, InteractsWithMedia;
+    use ConfiguresScoutSearch, HasFactory, InteractsWithMedia;
 
     protected $attributes = [
         'status' => 'awaiting_upload',
@@ -216,13 +220,46 @@ class MediaItem extends Model implements HasMedia
     public function compiledSearchText(): string
     {
         $keywords = is_array($this->keywords) ? implode(' ', $this->keywords) : '';
+        $path = $this->getFirstMedia('source')?->getPathRelativeToRoot() ?? '';
         $text = trim(implode(' ', array_filter([
             $this->title,
             $this->slug,
             $this->alt,
             $keywords,
+            $path,
+            $this->fileUrl(),
         ])));
 
         return mb_strtolower($text);
+    }
+
+    public static function searchIndexDefinition(): SearchIndexDefinition
+    {
+        return new SearchIndexDefinition([
+            SearchIndexField::string('title'),
+            SearchIndexField::string('slug'),
+            SearchIndexField::string('url'),
+            SearchIndexField::string('keywords'),
+            SearchIndexField::string('kind', filterable: true, searchable: false),
+            SearchIndexField::int64('created_at', sortable: true),
+        ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function searchableDocument(): array
+    {
+        $keywords = is_array($this->keywords) ? implode(' ', $this->keywords) : '';
+        $path = $this->getFirstMedia('source')?->getPathRelativeToRoot() ?? '';
+
+        return [
+            'title' => (string) $this->title,
+            'slug' => (string) $this->slug,
+            'url' => $path !== '' ? $path : (string) ($this->fileUrl() ?? ''),
+            'keywords' => $keywords,
+            'kind' => $this->kind instanceof MediaKind ? $this->kind->value : (string) $this->kind,
+            'created_at' => $this->created_at?->getTimestamp() ?? 0,
+        ];
     }
 }

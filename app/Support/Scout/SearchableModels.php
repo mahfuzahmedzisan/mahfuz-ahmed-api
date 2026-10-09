@@ -2,6 +2,7 @@
 
 namespace App\Support\Scout;
 
+use App\Models\MediaItem;
 use App\Models\User;
 
 final class SearchableModels
@@ -16,6 +17,7 @@ final class SearchableModels
     {
         return [
             User::class,
+            MediaItem::class,
         ];
     }
 }

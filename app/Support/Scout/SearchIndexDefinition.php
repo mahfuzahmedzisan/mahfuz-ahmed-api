@@ -94,6 +94,10 @@ final class SearchIndexDefinition
                 $definition['optional'] = true;
             }
 
+            if ($field->filterable) {
+                $definition['facet'] = true;
+            }
+
             $fields[] = $definition;
         }
 
