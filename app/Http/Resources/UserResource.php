@@ -27,6 +27,7 @@ class UserResource extends JsonResource
             'email_notifications' => (bool) $this->email_notifications,
             'push_notifications' => (bool) $this->push_notifications,
             'theme' => $this->theme ?: 'system',
+            'timezone' => $this->timezone,
             'created_at' => $this->created_at,
         ];
     }

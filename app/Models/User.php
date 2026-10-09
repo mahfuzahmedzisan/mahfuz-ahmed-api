@@ -25,7 +25,7 @@ use Laravel\Passport\HasApiTokens;
  * only ever written directly by trusted server code (UserSeeder, future
  * admin-promotion tooling).
  */
-#[Fillable(['name', 'email', 'password', 'avatar', 'email_notifications', 'push_notifications', 'theme'])]
+#[Fillable(['name', 'email', 'password', 'avatar', 'email_notifications', 'push_notifications', 'theme', 'timezone'])]
 #[Hidden(['password', 'remember_token', 'two_factor_secret', 'two_factor_recovery_codes'])]
 class User extends Authenticatable implements DefinesSearchIndex, OAuthenticatable
 {

@@ -35,10 +35,15 @@ class ProfileController extends Controller
 
     public function updatePreferences(Request $request): JsonResponse
     {
+        if ($request->exists('timezone') && in_array($request->input('timezone'), ['', 'auto'], true)) {
+            $request->merge(['timezone' => null]);
+        }
+
         $validated = $request->validate([
             'email_notifications' => ['sometimes', 'boolean'],
             'push_notifications' => ['sometimes', 'boolean'],
             'theme' => ['sometimes', 'string', Rule::in(['light', 'dark', 'system'])],
+            'timezone' => ['sometimes', 'nullable', 'timezone'],
         ]);
 
         /** @var User $user */

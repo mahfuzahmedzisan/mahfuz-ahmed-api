@@ -3,6 +3,8 @@
 namespace App\Providers;
 
 use App\Contracts\EncodesHls;
+use App\Mail\ApplicationMailManager;
+use App\Services\ApplicationSettings;
 use App\Services\FfmpegHlsEncoder;
 use App\Support\FrontendOrigins;
 use Carbon\CarbonInterval;
@@ -21,6 +23,10 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->bind(EncodesHls::class, FfmpegHlsEncoder::class);
+        $this->app->singleton(ApplicationSettings::class);
+        $this->app->extend('mail.manager', function ($manager, $app) {
+            return new ApplicationMailManager($app);
+        });
     }
 
     /**

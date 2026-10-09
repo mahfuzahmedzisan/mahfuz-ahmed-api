@@ -8,6 +8,7 @@ use App\Http\Requests\Api\V1\Auth\RefreshTokenRequest;
 use App\Http\Requests\Api\V1\Auth\TwoFactorChallengeRequest;
 use App\Http\Resources\UserResource;
 use App\Models\User;
+use App\Services\ApplicationSettings;
 use App\Services\PassportTokenService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -30,8 +31,12 @@ class AuthController extends Controller
         private readonly PassportTokenService $tokens,
     ) {}
 
-    public function register(Request $request, CreatesNewUsers $creator): JsonResponse
+    public function register(Request $request, CreatesNewUsers $creator, ApplicationSettings $settings): JsonResponse
     {
+        if (! $settings->registrationEnabled()) {
+            return $this->apiUnprocessable('Public registration is turned off.');
+        }
+
         $user = $creator->create($request->all());
 
         $token = $this->tokens->issuePasswordToken(

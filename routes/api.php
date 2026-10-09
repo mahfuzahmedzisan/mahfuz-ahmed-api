@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\V1\Admin\MediaController;
 use App\Http\Controllers\Api\V1\Admin\UserController;
+use App\Http\Controllers\Api\V1\ApplicationSettingsController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\BroadcastAuthController;
 use App\Http\Controllers\Api\V1\PasswordResetController;
@@ -11,6 +12,8 @@ use App\Http\Controllers\Api\V1\TwoFactorAuthenticationController;
 use App\Support\ApiResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+
+Route::get('settings/public', [ApplicationSettingsController::class, 'publicShow']);
 
 Route::prefix('auth')->group(function (): void {
     Route::post('register', [AuthController::class, 'register'])->middleware('throttle:register');
@@ -74,4 +77,10 @@ Route::middleware(['auth:api', 'role:admin', 'throttle:admin-users'])->group(fun
     Route::post('admin/media/{mediaItem}/thumbnail', [MediaController::class, 'thumbnail']);
     Route::post('admin/media/{mediaItem}/retry', [MediaController::class, 'retry']);
     Route::post('admin/media/{mediaItem}/resume', [MediaController::class, 'resumeUpload']);
+
+    Route::get('admin/settings', [ApplicationSettingsController::class, 'show']);
+    Route::put('admin/settings/general', [ApplicationSettingsController::class, 'updateGeneral']);
+    Route::put('admin/settings/smtp', [ApplicationSettingsController::class, 'updateSmtp']);
+    Route::post('admin/settings/logo', [ApplicationSettingsController::class, 'uploadLogo']);
+    Route::post('admin/settings/favicon', [ApplicationSettingsController::class, 'uploadFavicon']);
 });
