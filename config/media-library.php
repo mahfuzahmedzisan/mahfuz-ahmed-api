@@ -49,8 +49,10 @@ return [
     /*
      * The maximum file size of an item in bytes.
      * Adding a larger file will result in an exception.
+     * Tus already accepts uploads up to VIDEO_MAX_UPLOAD_BYTES. This must
+     * match, or a finished video is rejected while it is copied into the library.
      */
-    'max_file_size' => 1024 * 1024 * 10, // 10MB
+    'max_file_size' => (int) env('MEDIA_MAX_FILE_SIZE', env('VIDEO_MAX_UPLOAD_BYTES', 8 * 1024 * 1024 * 1024)),
 
     /*
      * Uploads whose file name contains any of these extensions will be rejected.
