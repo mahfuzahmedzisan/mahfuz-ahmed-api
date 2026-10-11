@@ -4,12 +4,11 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\V1\Auth\LoginRequest;
-use App\Http\Requests\Api\V1\Auth\RefreshTokenRequest;
 use App\Http\Requests\Api\V1\Auth\TwoFactorChallengeRequest;
 use App\Http\Resources\UserResource;
 use App\Models\User;
 use App\Services\ApplicationSettings;
-use App\Services\PassportTokenService;
+use App\Services\AuthTokenService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -28,7 +27,7 @@ class AuthController extends Controller
     private const CHALLENGE_TTL_MINUTES = 5;
 
     public function __construct(
-        private readonly PassportTokenService $tokens,
+        private readonly AuthTokenService $tokens,
     ) {}
 
     public function register(Request $request, CreatesNewUsers $creator, ApplicationSettings $settings): JsonResponse
@@ -39,10 +38,7 @@ class AuthController extends Controller
 
         $user = $creator->create($request->all());
 
-        $token = $this->tokens->issuePasswordToken(
-            $user->email,
-            $request->string('password')->toString(),
-        );
+        $token = $this->tokens->issue($user);
 
         return $this->apiCreated(
             'Registered successfully.',
@@ -68,17 +64,12 @@ class AuthController extends Controller
                 'two_factor' => true,
                 'challenge_token' => $this->createChallengeToken(
                     $user,
-                    $credentials['password'],
                     $request->boolean('remember'),
                 ),
             ]);
         }
 
-        $token = $this->tokens->issuePasswordToken(
-            $credentials['email'],
-            $credentials['password'],
-            remember: $request->boolean('remember'),
-        );
+        $token = $this->tokens->issue($user, $request->boolean('remember'));
 
         return $this->apiSuccess(
             'Logged in successfully.',
@@ -91,9 +82,8 @@ class AuthController extends Controller
      *
      * This API is stateless (Bearer tokens, no PHP session), so it can't use
      * Fortify's own session-based `login.id` flow. Instead the first factor
-     * (password) is proven once and sealed - along with the password itself,
-     * so the real OAuth token can still be minted via the password grant -
-     * into a short-lived, authenticated (`Crypt`), single-use challenge token.
+     * (password) is proven once and the user id is sealed into a short-lived,
+     * authenticated (`Crypt`), single-use challenge token.
      */
     public function twoFactorChallenge(
         TwoFactorChallengeRequest $request,
@@ -128,11 +118,7 @@ class AuthController extends Controller
 
         Cache::put($usedKey, true, now()->addMinutes(self::CHALLENGE_TTL_MINUTES + 1));
 
-        $token = $this->tokens->issuePasswordToken(
-            $payload['email'],
-            $payload['password'],
-            remember: $payload['remember'],
-        );
+        $token = $this->tokens->issue($user, $payload['remember']);
 
         return $this->apiSuccess(
             'Logged in successfully.',
@@ -149,35 +135,15 @@ class AuthController extends Controller
 
     public function logout(Request $request): JsonResponse
     {
-        $token = $request->user()?->token();
-
-        if ($token) {
-            $token->revoke();
-        }
+        $request->user()?->currentAccessToken()?->delete();
 
         return $this->apiSuccess('Logged out successfully.');
     }
 
-    public function refresh(RefreshTokenRequest $request): JsonResponse
-    {
-        $token = $this->tokens->refreshToken(
-            $request->string('refresh_token')->toString(),
-        );
-
-        return $this->apiSuccess('Token refreshed successfully.', [
-            'token_type' => $token['token_type'],
-            'expires_in' => $token['expires_in'],
-            'access_token' => $token['access_token'],
-            'refresh_token' => $token['refresh_token'],
-        ]);
-    }
-
-    private function createChallengeToken(User $user, string $password, bool $remember): string
+    private function createChallengeToken(User $user, bool $remember): string
     {
         return Crypt::encrypt([
             'user_id' => $user->id,
-            'email' => $user->email,
-            'password' => $password,
             'remember' => $remember,
             'nonce' => Str::random(40),
             'expires_at' => now()->addMinutes(self::CHALLENGE_TTL_MINUTES)->getTimestamp(),
@@ -185,7 +151,7 @@ class AuthController extends Controller
     }
 
     /**
-     * @return array{user_id: int, email: string, password: string, remember: bool, nonce: string, expires_at: int}
+     * @return array{user_id: int, remember: bool, nonce: string, expires_at: int}
      */
     private function decryptChallengeToken(string $token): array
     {
@@ -199,7 +165,7 @@ class AuthController extends Controller
 
         if (
             ! is_array($payload)
-            || ! isset($payload['user_id'], $payload['email'], $payload['password'], $payload['nonce'], $payload['expires_at'])
+            || ! isset($payload['user_id'], $payload['nonce'], $payload['expires_at'])
         ) {
             throw new BadRequestException('Malformed two-factor challenge token.');
         }
@@ -244,17 +210,13 @@ class AuthController extends Controller
     }
 
     /**
-     * @param  array{token_type: string, expires_in: int, access_token: string, refresh_token?: string|null}  $token
+     * @param  array{token_type: string, access_token: string, session_ends_at: int}  $token
      * @return array<string, mixed>
      */
     private function tokenPayload(array $token, User $user): array
     {
         return [
-            'token_type' => $token['token_type'],
-            'expires_in' => $token['expires_in'],
-            'access_token' => $token['access_token'],
-            'refresh_token' => $token['refresh_token'] ?? null,
-            'session_ends_at' => $token['session_ends_at'] ?? null,
+            ...$token,
             'user' => new UserResource($user),
         ];
     }

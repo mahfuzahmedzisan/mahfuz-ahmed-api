@@ -30,6 +30,7 @@ class PasswordResetController extends Controller
             $request->only('email', 'password', 'password_confirmation', 'token'),
             function ($user) use ($resetter, $request) {
                 $resetter->reset($user, $request->only('password', 'password_confirmation'));
+                $user->tokens()->delete();
             },
         );
 

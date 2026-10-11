@@ -31,7 +31,7 @@ class TwoFactorAuthenticationController extends Controller
     public function enable(Request $request, EnableTwoFactorAuthentication $enable): JsonResponse
     {
         $request->validate([
-            'current_password' => ['required', 'string', 'current_password:api'],
+            'current_password' => ['required', 'string', 'current_password:sanctum'],
         ]);
 
         $user = $request->user();
@@ -60,7 +60,7 @@ class TwoFactorAuthenticationController extends Controller
     public function disable(Request $request, DisableTwoFactorAuthentication $disable): JsonResponse
     {
         $request->validate([
-            'current_password' => ['required', 'string', 'current_password:api'],
+            'current_password' => ['required', 'string', 'current_password:sanctum'],
         ]);
 
         $disable($request->user());
@@ -71,7 +71,7 @@ class TwoFactorAuthenticationController extends Controller
     public function recoveryCodes(Request $request, GenerateNewRecoveryCodes $generate): JsonResponse
     {
         $request->validate([
-            'current_password' => ['required', 'string', 'current_password:api'],
+            'current_password' => ['required', 'string', 'current_password:sanctum'],
         ]);
 
         $generate($request->user());

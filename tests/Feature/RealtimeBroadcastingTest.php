@@ -6,20 +6,11 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\Event;
-use Laravel\Passport\ClientRepository;
 
 uses(RefreshDatabase::class);
 
 beforeEach(function (): void {
-    $client = app(ClientRepository::class)->createPasswordGrantClient(
-        'Test Password Grant Client',
-        'users',
-        true,
-    );
-
     config([
-        'services.passport.password_client_id' => $client->getKey(),
-        'services.passport.password_client_secret' => $client->plainSecret,
         'broadcasting.default' => 'reverb',
         'broadcasting.connections.reverb.key' => 'test-key-value',
         'broadcasting.connections.reverb.secret' => 'test-secret-value',

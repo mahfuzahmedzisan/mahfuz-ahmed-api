@@ -2,31 +2,16 @@
 
 use App\Models\User;
 use App\Services\ImageConversionService;
-use App\Services\SvgSanitizer;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
-use Laravel\Passport\ClientRepository;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\Response as HttpResponse;
 
 uses(RefreshDatabase::class);
 
-beforeEach(function (): void {
-    $client = app(ClientRepository::class)->createPasswordGrantClient(
-        'Test Password Grant Client',
-        'users',
-        true,
-    );
-
-    config([
-        'services.passport.password_client_id' => $client->getKey(),
-        'services.passport.password_client_secret' => $client->plainSecret,
-    ]);
-});
-
 /**
- * @return array{access_token: string, refresh_token: string, expires_in: int, user: array<string, mixed>}
+ * @return array{access_token: string, token_type: string, session_ends_at: int, user: array<string, mixed>}
  */
 function loginAs(string $email, string $password = 'Password1!'): array
 {
@@ -90,6 +75,32 @@ it('updates the authenticated user password', function (): void {
     ])->assertOk();
 });
 
+it('signs out other sessions when the password changes', function (): void {
+    User::factory()->create([
+        'email' => 'sessions@example.com',
+        'password' => 'Password1!',
+    ]);
+
+    $current = loginAs('sessions@example.com');
+    $other = loginAs('sessions@example.com');
+
+    $this->withToken($current['access_token'])
+        ->putJson('/api/v1/profile/password', [
+            'current_password' => 'Password1!',
+            'password' => 'Password2!',
+            'password_confirmation' => 'Password2!',
+        ])
+        ->assertOk();
+
+    $this->assertDatabaseCount('personal_access_tokens', 1);
+
+    auth()->forgetGuards();
+    $this->withToken($other['access_token'])->getJson('/api/v1/auth/me')->assertUnauthorized();
+
+    auth()->forgetGuards();
+    $this->withToken($current['access_token'])->getJson('/api/v1/auth/me')->assertOk();
+});
+
 it('rejects a password update when the current password is wrong', function (): void {
     User::factory()->create([
         'email' => 'password-wrong@example.com',
@@ -126,6 +137,7 @@ it('deletes the authenticated account and revokes tokens', function (): void {
     $this->assertDatabaseMissing('users', [
         'id' => $user->id,
     ]);
+    $this->assertDatabaseCount('personal_access_tokens', 0);
 
     auth()->forgetGuards();
 
@@ -325,12 +337,7 @@ it('rejects an svg avatar that cannot be sanitized', function (): void {
         'password' => 'Password1!',
     ]);
 
-    $this->mock(SvgSanitizer::class, function ($mock): void {
-        $mock->shouldReceive('isSvg')->andReturn(true);
-        $mock->shouldReceive('sanitize')
-            ->once()
-            ->andThrow(new RuntimeException('The SVG file could not be sanitized and was rejected.'));
-    });
+    Storage::fake('public');
 
     $login = loginAs('avatar-svg-bad@example.com');
 
@@ -338,13 +345,13 @@ it('rejects an svg avatar that cannot be sanitized', function (): void {
         ->post('/api/v1/profile/avatar', [
             'avatar' => UploadedFile::fake()->createWithContent(
                 'avatar.svg',
-                '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
+                '<svg xmlns="http://www.w3.org/2000/svg"><circle></svg>',
             ),
         ], [
             'Accept' => 'application/json',
         ])
         ->assertStatus(HttpResponse::HTTP_UNPROCESSABLE_ENTITY)
-        ->assertJsonPath('message', 'The SVG file could not be sanitized and was rejected.')
+        ->assertJsonPath('message', 'This image could not be sanitized.')
         ->assertJsonPath('data', null);
 });
 

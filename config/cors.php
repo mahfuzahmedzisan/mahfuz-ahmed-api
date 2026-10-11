@@ -25,7 +25,7 @@ return [
      * misconfigured or compromised client-side script cannot call this API
      * directly from the browser. The real caller gate is EnsureTrustedBff.
      */
-    'paths' => ['api/*', 'oauth/*'],
+    'paths' => ['api/*'],
 
     'allowed_methods' => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 

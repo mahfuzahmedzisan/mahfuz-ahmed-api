@@ -1,48 +1,30 @@
 # Deploying the API (Coolify + Docker)
 
 The image is rebuilt from scratch on every deploy, so anything written inside
-the container is gone the moment it ships. Two things must therefore live
-outside the image: the Passport signing keys and the `storage` directory.
+the container is gone the moment it ships. The `storage` directory must
+therefore live outside the image.
 
-Get these wrong and the symptom is always the same - everyone who was logged in
-starts getting `401 Unauthenticated` right after a deploy.
+## 1. Authentication (Sanctum API tokens)
 
-## 1. Passport signing keys (required)
+The API issues Sanctum personal access tokens to the Next.js BFF. Tokens are
+SHA-256 hashed in the `personal_access_tokens` table, so they survive a
+rebuild without any signing keys or OAuth clients.
 
-Passport signs every access token with an RSA key. Without
-`PASSPORT_PRIVATE_KEY` / `PASSPORT_PUBLIC_KEY` set, it falls back to
-`storage/oauth-private.key` inside the container, which a rebuild replaces -
-invalidating every token ever issued.
+- Login issues a token that expires after 12 hours, or 30 days with
+  "remember me". There is no refresh token; an expired token returns `401`
+  and the BFF signs the user out.
+- Logout deletes the current token. A password change deletes every other
+  token of that user, and a password reset or account deletion deletes all of
+  them.
+- `sanctum:prune-expired --hours=24` runs daily from the scheduler to clear
+  expired rows.
+- Optional: set `SANCTUM_TOKEN_PREFIX` (for example `mak_`) so leaked tokens
+  are recognisable by secret scanners. Changing it only affects new tokens.
 
-Generate the pair once, locally:
+Rotating `APP_KEY` does not sign anyone out, but it does invalidate in-flight
+two-factor challenge tokens (they are sealed with `Crypt`).
 
-```bash
-php artisan passport:keys
-```
-
-Copy the full contents of `storage/oauth-private.key` and
-`storage/oauth-public.key` into the Coolify environment variables of the same
-name. Include the `-----BEGIN ...-----` and `-----END ...-----` lines and keep
-the line breaks - Coolify's multiline value editor handles them.
-
-Rotating these keys signs out every user, so treat them as long-lived secrets.
-
-## 2. Password grant client (required)
-
-`config/services.php` reads the client credentials from the environment and
-throws a 500 if either is missing. Create the client once:
-
-```bash
-php artisan passport:client --password
-```
-
-Store the id and secret as `PASSPORT_PASSWORD_CLIENT_ID` and
-`PASSPORT_PASSWORD_CLIENT_SECRET` in Coolify.
-
-Never run `passport:install` or `passport:client` from a deploy step. Each run
-mints a *new* client and orphans every token issued to the old one.
-
-## 3. Persistent storage volume (required)
+## 2. Persistent storage volume (required)
 
 Uploaded media is written to the `public` disk, which resolves to
 `storage/app/public`. That is inside the container. Without a volume, every
@@ -54,17 +36,16 @@ Because the volume shadows the directory baked into the image, the container
 needs its skeleton recreated on boot; `docker/entrypoint.sh` handles that along
 with `storage:link`.
 
-## 4. Database
+## 3. Database
 
-Passport `oauth_*` tables live in the database and survive a rebuild on their
-own. `docker/entrypoint.sh` runs `php artisan migrate --force` on every boot,
-so a new table is created before Nginx serves traffic. A missing `videos` or
+`docker/entrypoint.sh` runs `php artisan migrate --force` on every boot, so a
+new table is created before Nginx serves traffic. A missing `videos` or
 `media` table shows up on the Vercel admin as “Server Error”.
 
-Never run `migrate:fresh` against production. It truncates `oauth_access_tokens`
-and `oauth_refresh_tokens` along with everything else.
+Never run `migrate:fresh` against production. It truncates
+`personal_access_tokens` (signing everyone out) along with everything else.
 
-## 5. Redis (required for cache + queues)
+## 4. Redis (required for cache + queues)
 
 This image expects an **external** Redis (Coolify Redis resource or managed
 host). The PHP `redis` extension is already enabled in the Dockerfile. Do not
@@ -83,8 +64,8 @@ CACHE_STORE=redis
 fallbacks when the URL is empty. The Supervisor queue worker reads
 `QUEUE_CONNECTION` (default `redis` in the image).
 
-API sessions stay on `SESSION_DRIVER=file` (or `database`) — Passport tokens do
-not need Redis sessions.
+API sessions stay on `SESSION_DRIVER=file` (or `database`). Sanctum bearer
+tokens do not use sessions.
 
 ## Configuration caching
 
@@ -97,10 +78,10 @@ they silently override the real values.
 ## Verifying a deploy did not sign everyone out
 
 Stay logged in to the admin panel, deploy, then reload. If you land back on the
-login page, one of the three requirements above is not in place - check the
-Passport key variables first.
+login page, check that the database volume is intact and that no deploy step
+ran `migrate:fresh` or truncated `personal_access_tokens`.
 
-## 6. Search (optional at runtime)
+## 5. Search (optional at runtime)
 
 Search engines stay **outside** this image (Typesense, Meilisearch, Algolia, or
 Turbopuffer). `SCOUT_DRIVER=collection` or an unreachable engine still serves

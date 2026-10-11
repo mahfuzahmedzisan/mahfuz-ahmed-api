@@ -16,8 +16,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Fortify\TwoFactorAuthenticatable;
-use Laravel\Passport\Contracts\OAuthenticatable;
-use Laravel\Passport\HasApiTokens;
+use Laravel\Sanctum\HasApiTokens;
 
 /**
  * `role` is intentionally excluded from #[Fillable] - it must never be
@@ -27,7 +26,7 @@ use Laravel\Passport\HasApiTokens;
  */
 #[Fillable(['name', 'email', 'password', 'avatar', 'email_notifications', 'push_notifications', 'theme', 'timezone'])]
 #[Hidden(['password', 'remember_token', 'two_factor_secret', 'two_factor_recovery_codes'])]
-class User extends Authenticatable implements DefinesSearchIndex, OAuthenticatable
+class User extends Authenticatable implements DefinesSearchIndex
 {
     /** @use HasFactory<UserFactory> */
     use ConfiguresScoutSearch, HasApiTokens, HasFactory, Notifiable, TwoFactorAuthenticatable;

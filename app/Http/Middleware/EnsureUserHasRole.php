@@ -8,10 +8,10 @@ use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Authorization, not just authentication. `auth:api` only proves a request
+ * Authorization, not just authentication. `auth:sanctum` only proves a request
  * carries a valid token for *some* user - it says nothing about which role
  * that user has. Every privileged route must stack this middleware on top
- * of `auth:api`, e.g. `->middleware(['auth:api', 'role:admin'])`.
+ * of `auth:sanctum`, e.g. `->middleware(['auth:sanctum', 'role:admin'])`.
  */
 class EnsureUserHasRole
 {

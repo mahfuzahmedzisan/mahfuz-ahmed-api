@@ -2,22 +2,8 @@
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Laravel\Passport\ClientRepository;
 
 uses(RefreshDatabase::class);
-
-beforeEach(function (): void {
-    $client = app(ClientRepository::class)->createPasswordGrantClient(
-        'Test Password Grant Client',
-        'users',
-        true,
-    );
-
-    config([
-        'services.passport.password_client_id' => $client->getKey(),
-        'services.passport.password_client_secret' => $client->plainSecret,
-    ]);
-});
 
 function adminToken(): string
 {

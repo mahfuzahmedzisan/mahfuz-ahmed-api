@@ -13,7 +13,7 @@ uses(RefreshDatabase::class);
 function finishUpload(string $filename, string $mime, string $bytes, string $kindTitle = 'Sample'): array
 {
     $admin = User::factory()->admin()->create();
-    $created = test()->actingAs($admin, 'api')->postJson('/api/v1/admin/media', [
+    $created = actingAsSanctum($admin)->postJson('/api/v1/admin/media', [
         'title' => $kindTitle,
         'filename' => $filename,
         'size' => strlen($bytes),
@@ -61,7 +61,7 @@ function finishUpload(string $filename, string $mime, string $bytes, string $kin
 it('rejects a php payload renamed as a jpeg', function (): void {
     $admin = User::factory()->admin()->create();
 
-    $this->actingAs($admin, 'api')->postJson('/api/v1/admin/media', [
+    actingAsSanctum($admin)->postJson('/api/v1/admin/media', [
         'title' => 'Photo',
         'filename' => 'shell.php.jpg',
         'size' => 32,
@@ -72,7 +72,7 @@ it('rejects a php payload renamed as a jpeg', function (): void {
 it('rejects an archive before it is stored', function (): void {
     $admin = User::factory()->admin()->create();
 
-    $this->actingAs($admin, 'api')->postJson('/api/v1/admin/media', [
+    actingAsSanctum($admin)->postJson('/api/v1/admin/media', [
         'title' => 'Bundle',
         'filename' => 'crack.zip',
         'size' => 32,
@@ -92,7 +92,7 @@ it('numbers a shared name and skips slugs that already exist', function (): void
     $admin = User::factory()->admin()->create();
     MediaItem::factory()->create(['title' => 'New image', 'slug' => 'new-image']);
 
-    $this->actingAs($admin, 'api')
+    actingAsSanctum($admin)
         ->getJson('/api/v1/admin/media/slug-preview?title=New%20image&count=2')
         ->assertOk()
         ->assertJsonPath('data.slugs.0', 'new-image-1')
@@ -107,7 +107,7 @@ it('finds media by name when the search index has no hits', function (): void {
     MediaItem::factory()->create(['title' => 'bangladesh-map', 'slug' => 'bangladesh-map', 'kind' => MediaKind::Image]);
     MediaItem::factory()->create(['title' => 'Share Title', 'slug' => 'share-title', 'kind' => MediaKind::Image]);
 
-    $this->actingAs($admin, 'api')
+    actingAsSanctum($admin)
         ->getJson('/api/v1/admin/media?filter[q]=map&filter[kind]=image')
         ->assertOk()
         ->assertJsonCount(1, 'data.media')

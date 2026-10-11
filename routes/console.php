@@ -32,3 +32,5 @@ Schedule::call(function (): void {
         ->where('created_at', '<', now()->subHours($hours))
         ->each(fn (MediaItem $item) => $item->delete());
 })->hourly()->name('prune-abandoned-media-uploads')->withoutOverlapping();
+
+Schedule::command('sanctum:prune-expired --hours=24')->daily();

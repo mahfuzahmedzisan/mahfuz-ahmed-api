@@ -3,6 +3,7 @@
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Fortify\Fortify;
+use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
 
 /*
@@ -51,6 +52,17 @@ expect()->extend('toBeOne', function () {
 | global functions to help you to reduce the number of lines of code in your test files.
 |
 */
+
+/**
+ * `Sanctum::actingAs` returns the user, so this hands back the test case to
+ * keep request chains like `actingAsSanctum($admin)->postJson(...)`.
+ */
+function actingAsSanctum(User $user, array $abilities = ['*']): mixed
+{
+    Sanctum::actingAs($user, $abilities);
+
+    return test();
+}
 
 function enableConfirmedTwoFactor(User $user, string $recoveryCode = 'recovery-code-alpha'): User
 {

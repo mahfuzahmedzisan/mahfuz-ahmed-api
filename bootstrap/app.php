@@ -27,8 +27,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'tus.hook' => EnsureTusHook::class,
         ]);
 
-        // Every /api/v1 route. Not applied to /oauth/token (Passport's
-        // internal password grant) or /up (Coolify healthcheck).
+        // Every /api/v1 route. Not applied to /up (Coolify healthcheck).
         $middleware->appendToGroup('api', EnsureTrustedBff::class);
 
         // This is an API-only application with no `login` route to redirect

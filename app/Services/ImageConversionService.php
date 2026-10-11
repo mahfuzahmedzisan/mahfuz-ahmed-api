@@ -34,8 +34,14 @@ class ImageConversionService
         if ($format === 'svg' && $options->passthroughSvg) {
             $relative = $directory.'/'.$basename.'.svg';
             $absolute = $storage->path($relative);
-            $clean = $this->svgSanitizer->sanitize($this->readContents($source));
-            $this->writeBytes($absolute, $clean);
+            $cleanPath = $this->svgSanitizer->sanitize($this->pathOf($source));
+
+            try {
+                $this->writeBytes($absolute, $this->readContents($cleanPath));
+            } finally {
+                @unlink($cleanPath);
+            }
+
             $this->optimizeQuietly($absolute);
 
             return new StoredImageResult($relative, 'svg', $disk, 'image/svg+xml');

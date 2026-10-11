@@ -12,6 +12,7 @@ use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Laravel\Fortify\Contracts\UpdatesUserPasswords;
 use Laravel\Fortify\Contracts\UpdatesUserProfileInformation;
+use Laravel\Sanctum\PersonalAccessToken;
 use RuntimeException;
 use Throwable;
 
@@ -26,9 +27,19 @@ class ProfileController extends Controller
         ]);
     }
 
+    /**
+     * Signs out every other session; the one that changed the password stays.
+     */
     public function updatePassword(Request $request, UpdatesUserPasswords $updater): JsonResponse
     {
-        $updater->update($request->user(), $request->all());
+        /** @var User $user */
+        $user = $request->user();
+        $updater->update($user, $request->all());
+
+        $current = $user->currentAccessToken();
+        $user->tokens()
+            ->when($current instanceof PersonalAccessToken, fn ($query) => $query->whereKeyNot($current->getKey()))
+            ->delete();
 
         return $this->apiSuccess('Password updated successfully.');
     }
@@ -93,13 +104,13 @@ class ProfileController extends Controller
     }
 
     /**
-     * Deletes the authenticated user's account. Revokes every Passport token
+     * Deletes the authenticated user's account. Deletes every API token
      * first so no token outlives the account it was issued for.
      */
     public function destroy(Request $request, AvatarStorageService $avatars): JsonResponse
     {
         $request->validate([
-            'current_password' => ['required', 'string', 'current_password:api'],
+            'current_password' => ['required', 'string', 'current_password:sanctum'],
         ]);
 
         /** @var User $user */
@@ -107,7 +118,7 @@ class ProfileController extends Controller
 
         $avatars->purge($user);
 
-        $user->tokens()->update(['revoked' => true]);
+        $user->tokens()->delete();
         $user->delete();
 
         return $this->apiSuccess('Account deleted successfully.');
