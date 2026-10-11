@@ -14,7 +14,7 @@
         "enshrined/svg-sanitize": "0.22.0",
         "laravel/fortify": "^1.40",
         "laravel/framework": "^13.8",
-        "laravel/passport": "^13.0",
+        "laravel/sanctum": "^4.3",
         "laravel/scout": "^11.8",
         "laravel/tinker": "^3.0",
         "meilisearch/meilisearch-php": "^1.17",

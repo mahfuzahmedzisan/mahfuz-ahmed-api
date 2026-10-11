@@ -10,7 +10,7 @@ use Symfony\Component\HttpFoundation\Response;
 class BroadcastAuthController extends Controller
 {
     /**
-     * Passport-authenticated stand-in for Laravel's session `/broadcasting/auth`.
+     * Sanctum token-authenticated stand-in for Laravel's session `/broadcasting/auth`.
      * Echo sends `socket_id` and `channel_name`; the response is Pusher's auth
      * payload (not this API's `{ message, data }` envelope).
      */

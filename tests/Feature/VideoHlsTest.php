@@ -55,7 +55,7 @@ function createMedia(array $extra = []): array
 {
     $admin = User::factory()->admin()->create();
 
-    $created = test()->actingAs($admin, 'api')->postJson('/api/v1/admin/media', array_merge([
+    $created = actingAsSanctum($admin)->postJson('/api/v1/admin/media', array_merge([
         'title' => 'Clip',
         'filename' => 'clip.mp4',
         'size' => strlen(mp4Bytes()),
@@ -72,7 +72,7 @@ function createMedia(array $extra = []): array
 it('creates a media item and an upload token without accepting a file body', function (): void {
     $admin = User::factory()->admin()->create();
 
-    $response = $this->actingAs($admin, 'api')->postJson('/api/v1/admin/media', [
+    $response = actingAsSanctum($admin)->postJson('/api/v1/admin/media', [
         'title' => 'Launch film',
         'filename' => 'launch.mp4',
         'size' => 2048,
@@ -103,7 +103,7 @@ it('creates a media item and an upload token without accepting a file body', fun
 it('returns an https tus endpoint when the proxy terminated tls', function (): void {
     $admin = User::factory()->admin()->create();
 
-    $endpoint = $this->actingAs($admin, 'api')
+    $endpoint = actingAsSanctum($admin)
         ->postJson('/api/v1/admin/media', [
             'title' => 'Launch film',
             'filename' => 'launch.mp4',
@@ -121,7 +121,7 @@ it('returns an https tus endpoint when the proxy terminated tls', function (): v
 it('rejects a multipart file on media create', function (): void {
     $admin = User::factory()->admin()->create();
 
-    $this->actingAs($admin, 'api')->post('/api/v1/admin/media', [
+    actingAsSanctum($admin)->post('/api/v1/admin/media', [
         'title' => 'Launch film',
         'filename' => 'launch.mp4',
         'size' => 2048,
@@ -133,7 +133,7 @@ it('rejects a multipart file on media create', function (): void {
 it('forbids a regular user and a missing bff secret from creating media', function (): void {
     $member = User::factory()->member()->create();
 
-    $this->actingAs($member, 'api')->postJson('/api/v1/admin/media', [
+    actingAsSanctum($member)->postJson('/api/v1/admin/media', [
         'title' => 'Nope',
         'filename' => 'nope.mp4',
         'size' => 10,
@@ -283,7 +283,7 @@ it('marks a video ready from a mocked encoder and deletes the raw source', funct
 
     $admin = User::factory()->admin()->create();
 
-    $payload = $this->actingAs($admin, 'api')
+    $payload = actingAsSanctum($admin)
         ->getJson('/api/v1/admin/media/'.$item->id)
         ->assertOk()
         ->json('data.media');
@@ -335,7 +335,7 @@ it('deletes the media item, its files, and the hls directory', function (): void
     file_put_contents($source, 'source-bytes');
     $item->addMedia($source)->usingFileName('secret-source.mp4')->toMediaCollection('source');
 
-    $this->actingAs($admin, 'api')
+    actingAsSanctum($admin)
         ->deleteJson('/api/v1/admin/media/'.$item->id)
         ->assertOk();
 
@@ -367,7 +367,7 @@ it('finds media by keyword', function (): void {
         'keywords' => ['poster'],
     ]);
 
-    $this->actingAs($admin, 'api')
+    actingAsSanctum($admin)
         ->getJson('/api/v1/admin/media?filter[q]=podcast&filter[kind]=audio')
         ->assertOk()
         ->assertJsonPath('data.meta.total', 1)

@@ -24,7 +24,7 @@ it('returns public settings from config when nothing is stored', function (): vo
 it('lets an admin save general settings and hides them from guests only as public fields', function (): void {
     $admin = User::factory()->admin()->create();
 
-    $this->actingAs($admin, 'api')->putJson('/api/v1/admin/settings/general', [
+    actingAsSanctum($admin)->putJson('/api/v1/admin/settings/general', [
         'name' => 'Northwind',
         'short_name' => 'NW',
         'registration_enabled' => false,
@@ -42,7 +42,7 @@ it('lets an admin save general settings and hides them from guests only as publi
 it('refuses application settings to a member', function (): void {
     $member = User::factory()->member()->create();
 
-    $this->actingAs($member, 'api')
+    actingAsSanctum($member)
         ->getJson('/api/v1/admin/settings')
         ->assertForbidden();
 });
@@ -50,7 +50,7 @@ it('refuses application settings to a member', function (): void {
 it('rejects public registration when the setting is off', function (): void {
     $admin = User::factory()->admin()->create();
 
-    $this->actingAs($admin, 'api')->putJson('/api/v1/admin/settings/general', [
+    actingAsSanctum($admin)->putJson('/api/v1/admin/settings/general', [
         'name' => 'Northwind',
         'short_name' => 'NW',
         'registration_enabled' => false,
@@ -69,7 +69,7 @@ it('stores smtp details without returning the password and uses them only when e
     $admin = User::factory()->admin()->create();
     $settings = app(ApplicationSettings::class);
 
-    $this->actingAs($admin, 'api')->putJson('/api/v1/admin/settings/smtp', [
+    actingAsSanctum($admin)->putJson('/api/v1/admin/settings/smtp', [
         'enabled' => true,
         'host' => 'smtp.example.com',
         'port' => 2525,
@@ -91,7 +91,7 @@ it('stores smtp details without returning the password and uses them only when e
         ->and(config('mail.mailers.smtp.password'))->toBe('secret-pass')
         ->and(config('mail.from.address'))->toBe('hello@example.com');
 
-    $this->actingAs($admin, 'api')->putJson('/api/v1/admin/settings/smtp', [
+    actingAsSanctum($admin)->putJson('/api/v1/admin/settings/smtp', [
         'enabled' => false,
         'host' => 'smtp.example.com',
         'port' => 2525,
@@ -108,11 +108,11 @@ it('stores a brand file on the public disk', function (): void {
     Storage::fake('public');
     $admin = User::factory()->admin()->create();
 
-    $this->actingAs($admin, 'api')->post('/api/v1/admin/settings/logo', [
+    actingAsSanctum($admin)->post('/api/v1/admin/settings/logo', [
         'file' => UploadedFile::fake()->image('logo.png'),
     ])->assertOk();
 
-    $url = $this->actingAs($admin, 'api')->getJson('/api/v1/admin/settings')->json('data.settings.general.logo_url');
+    $url = actingAsSanctum($admin)->getJson('/api/v1/admin/settings')->json('data.settings.general.logo_url');
     expect($url)->toBeString()->toContain('/storage/settings/');
 
     Storage::disk('public')->assertExists(
@@ -123,7 +123,7 @@ it('stores a brand file on the public disk', function (): void {
 it('stores an IANA timezone and treats auto as no preference', function (): void {
     $user = User::factory()->create();
 
-    $this->actingAs($user, 'api')->putJson('/api/v1/profile/preferences', [
+    actingAsSanctum($user)->putJson('/api/v1/profile/preferences', [
         'timezone' => 'Asia/Dhaka',
     ])->assertOk()
         ->assertJsonPath('data.user.timezone', 'Asia/Dhaka');
@@ -133,12 +133,12 @@ it('stores an IANA timezone and treats auto as no preference', function (): void
         'timezone' => 'Asia/Dhaka',
     ]);
 
-    $this->actingAs($user, 'api')->putJson('/api/v1/profile/preferences', [
+    actingAsSanctum($user)->putJson('/api/v1/profile/preferences', [
         'timezone' => 'auto',
     ])->assertOk()
         ->assertJsonPath('data.user.timezone', null);
 
-    $this->actingAs($user, 'api')->putJson('/api/v1/profile/preferences', [
+    actingAsSanctum($user)->putJson('/api/v1/profile/preferences', [
         'timezone' => 'Not/AZone',
     ])->assertUnprocessable()
         ->assertJsonValidationErrors(['timezone']);
