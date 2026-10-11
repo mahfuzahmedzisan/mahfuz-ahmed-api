@@ -1,9 +1,12 @@
 <?php
 
+use App\Enums\MediaKind;
 use App\Enums\VideoStatus;
 use App\Models\MediaItem;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Laravel\Scout\EngineManager;
+use Laravel\Scout\Engines\NullEngine;
 
 uses(RefreshDatabase::class);
 
@@ -94,6 +97,21 @@ it('numbers a shared name and skips slugs that already exist', function (): void
         ->assertOk()
         ->assertJsonPath('data.slugs.0', 'new-image-1')
         ->assertJsonPath('data.slugs.1', 'new-image-2');
+});
+
+it('finds media by name when the search index has no hits', function (): void {
+    config(['scout.driver' => 'typesense']);
+    app(EngineManager::class)->forgetDrivers()->extend('typesense', fn () => new NullEngine);
+
+    $admin = User::factory()->admin()->create();
+    MediaItem::factory()->create(['title' => 'bangladesh-map', 'slug' => 'bangladesh-map', 'kind' => MediaKind::Image]);
+    MediaItem::factory()->create(['title' => 'Share Title', 'slug' => 'share-title', 'kind' => MediaKind::Image]);
+
+    $this->actingAs($admin, 'api')
+        ->getJson('/api/v1/admin/media?filter[q]=map&filter[kind]=image')
+        ->assertOk()
+        ->assertJsonCount(1, 'data.media')
+        ->assertJsonPath('data.media.0.slug', 'bangladesh-map');
 });
 
 it('accepts an svg and stores it without script', function (): void {

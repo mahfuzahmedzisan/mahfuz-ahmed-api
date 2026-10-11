@@ -61,12 +61,17 @@ class MediaController extends Controller
                         ->implode(' || ');
                 }
 
-                if (ScoutSearch::apply($query, MediaItem::class, $term, $options)) {
-                    return;
-                }
-
                 $like = '%'.addcslashes(mb_strtolower($term), '%_\\').'%';
-                $query->where('search_text', 'like', $like);
+                $ids = ScoutSearch::keys(MediaItem::class, $term, $options) ?? [];
+
+                // A missing or stale index must not hide rows the database already matches.
+                $query->where(function ($inner) use ($like, $ids): void {
+                    $inner->where('search_text', 'like', $like);
+
+                    if ($ids !== []) {
+                        $inner->orWhereIn($inner->getModel()->getQualifiedKeyName(), $ids);
+                    }
+                });
             }),
         ], [
             'title',
